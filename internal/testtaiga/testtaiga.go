@@ -6,12 +6,8 @@ package testtaiga
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -24,36 +20,17 @@ const (
 )
 
 // URL returns the base URL of the test Taiga (no /api/v1 suffix). It panics if the
-// URL points at a non-local host, so every helper consumer is safe: tests must never
-// write to a real Taiga. Set TAIGA_TEST_ALLOW_REMOTE=1 to override.
+// URL is not on loopback, so every helper consumer is safe: tests must never write
+// to a real Taiga.
 func URL() string {
 	u := "http://localhost:8000"
 	if v := os.Getenv("TAIGA_TEST_URL"); v != "" {
 		u = v
 	}
-	if err := checkLocal(u, os.Getenv("TAIGA_TEST_ALLOW_REMOTE") == "1"); err != nil {
+	if err := checkLocal(u); err != nil {
 		panic(err)
 	}
 	return u
-}
-
-// checkLocal accepts localhost, loopback addresses and single-label hosts (compose service names).
-func checkLocal(rawURL string, allowRemote bool) error {
-	if allowRemote {
-		return nil
-	}
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Hostname() == "" {
-		return fmt.Errorf("testtaiga: invalid TAIGA_TEST_URL %q", rawURL)
-	}
-	host := u.Hostname()
-	if host == "localhost" || !strings.Contains(host, ".") && net.ParseIP(host) == nil {
-		return nil
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return nil
-	}
-	return fmt.Errorf("testtaiga: refusing non-local TAIGA_TEST_URL host %q (set TAIGA_TEST_ALLOW_REMOTE=1 to override)", host)
 }
 
 // Login authenticates directly against /api/v1/auth, bypassing the code under test.
