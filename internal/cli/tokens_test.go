@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/BasisTI/taiga-cli/internal/auth"
+	"github.com/BasisTI/taiga-cli/internal/config"
 )
 
 func sessionServer(t *testing.T, token string) (string, *[]recorded) {
@@ -72,5 +75,29 @@ func TestEnvCredentialsAllowedForRepoURLKnownToConfig(t *testing.T) {
 	env := map[string]string{"HOME": home, "TAIGA_TOKEN": "secret-token"}
 	if _, errOut, code := runInRepo(t, env, "url = \""+url+"\"\n", "api", "GET", "users/me"); code != 0 {
 		t.Fatalf("code=%d err=%s", code, errOut)
+	}
+}
+
+// Codex review #4, end to end: file secret, no session, read-only sessions dir.
+func TestReadOnlyStateWithoutSessionDoesNotUseStoredFileSecret(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores permissions")
+	}
+	url, calls := sessionServer(t, testJWT(time.Now().Add(time.Hour)))
+	home := t.TempDir()
+	ref := auth.SessionRef(url, "svc")
+	if err := (auth.FileSecret{Path: filepath.Join(home, ".config", "taiga", "secrets", ref)}).Put([]byte("pw")); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(filepath.Join(home, ".config", "taiga", "config.toml"), config.File{DefaultHost: url, Hosts: []config.Host{{URL: url, Username: "svc", SecretSource: "file"}}}); err != nil {
+		t.Fatal(err)
+	}
+	sessions := filepath.Join(home, ".local", "state", "taiga", "sessions")
+	_ = os.MkdirAll(sessions, 0o700)
+	_ = os.Chmod(sessions, 0o500)
+	t.Cleanup(func() { _ = os.Chmod(sessions, 0o700) })
+	_, errOut, code := runIn(t, map[string]string{"HOME": home}, "", "api", "GET", "users/me", "--output", "json")
+	if code != 3 || !strings.Contains(errOut, "session_cache_readonly") || len(*calls) != 0 {
+		t.Fatalf("code=%d err=%s calls=%d", code, errOut, len(*calls))
 	}
 }

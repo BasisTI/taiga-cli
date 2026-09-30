@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -153,7 +154,7 @@ func TestReadOnlyWithEnvPasswordLogsInInMemoryAndWarns(t *testing.T) {
 	f := newFakeAuth(t)
 	dir := readOnlyStateDir(t, nil, "")
 	var warned string
-	r := newResolver(f, dir, staticSecret("pw"))
+	r := newResolver(f, dir, FirstOf{EnvPassword{Env: func(k string) string { return map[string]string{"TAIGA_PASSWORD": "pw"}[k] }}})
 	r.Warn = func(code, _ string) { warned = code }
 	if _, err := r.Token(context.Background()); err != nil {
 		t.Fatal(err)
@@ -249,5 +250,17 @@ func TestForceRefreshReadOnlyWithExistingLockDoesNotBurnRefresh(t *testing.T) {
 	}
 	if f.refreshes != 0 {
 		t.Fatal("persisted refresh token was spent")
+	}
+}
+
+// Codex review #4: a read-only cache restricts the sources even without a session:
+// the stored secret (keyring, secret_command, file) is left for a login outside the sandbox.
+func TestReadOnlyWithoutSessionIgnoresStoredSecret(t *testing.T) {
+	f := newFakeAuth(t)
+	dir := readOnlyStateDir(t, nil, "")
+	_, err := newResolver(f, dir, staticSecret("pw")).Token(context.Background())
+	e := output.AsError(err)
+	if e.Code != "session_cache_readonly" || e.Exit != output.ExitAuth || !strings.Contains(e.Recovery, "outside the sandbox") || f.logins != 0 {
+		t.Fatalf("%+v logins=%d", e, f.logins)
 	}
 }

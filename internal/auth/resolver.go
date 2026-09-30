@@ -75,11 +75,15 @@ func (r *Resolver) Token(ctx context.Context) (taiga.Token, error) {
 		}
 	}
 	secret := r.Secret
-	if hadSession && readOnly {
-		// In a sandbox only an env password may log in again; the stored secret stays for `taiga auth refresh`.
+	if readOnly {
+		// In a sandbox only an env password may log in; the stored secret (keyring,
+		// secret_command, file) is left for `taiga auth login|refresh` outside it.
 		secret = envOnly(secret)
 	}
 	if secret == nil {
+		if readOnly && !hadSession {
+			return taiga.Token{}, &output.Error{Code: "session_cache_readonly", Source: "session_cache", Stage: r.Store.Path(r.ref()), Cause: "no session and the session cache is read-only; the stored secret is not used here", Recovery: "run `taiga auth login` outside the sandbox, or set TAIGA_PASSWORD", Exit: output.ExitAuth}
+		}
 		if hadSession && readOnly {
 			return taiga.Token{}, &output.Error{Code: "session_expired", Source: "session_cache", Stage: r.Store.Path(r.ref()), Cause: "session expired and the session cache is read-only", Recovery: "run `taiga auth refresh` outside the sandbox", Exit: output.ExitAuth}
 		}

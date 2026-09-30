@@ -32,7 +32,7 @@ Todo erro sai no stderr como `{"error":{"code","source","stage","cause","recover
 | `auth_invalid_credentials` | 3 | `api` | `POST /auth` respondeu 400 ou 401 | conferir usuário e fonte de segredo |
 | `auth_rejected` | 3 | `api` | a API respondeu 401 a uma chamada autenticada | `taiga auth status --diagnose` |
 | `session_expired` | 3 | `session_cache` | refresh recusado, ou sessão vencida com o cache somente leitura (sandbox) | `taiga auth refresh` fora do sandbox, ou `taiga auth login` |
-| `session_cache_readonly` | 3 | `session_cache` | `taiga auth refresh` com o state dir somente leitura. Como aviso (stderr, sem falhar): token obtido por login mantido só em memória | rodar fora do sandbox; ou incluir o state dir em `writable_roots` |
+| `session_cache_readonly` | 3 | `session_cache` | `taiga auth refresh` com o state dir somente leitura; ou nenhuma sessão, cache somente leitura e sem `TAIGA_PASSWORD`/`TAIGA_PASSWORD_FILE` (keyring, `secret_command` e arquivo não são usados no sandbox). Como aviso (stderr, sem falhar): token obtido por login com senha do env mantido só em memória | rodar fora do sandbox; ou incluir o state dir em `writable_roots` |
 | `session_cache_write_failed` | — | — | aviso: a sessão nova não pôde ser gravada por outro motivo | conferir o state dir |
 | `password_file_unreadable` | 3 | `env` | `TAIGA_PASSWORD_FILE` não pôde ser lido | conferir caminho e permissões |
 | `password_file_empty` | 3 | `env` | `TAIGA_PASSWORD_FILE` vazio | preencher o arquivo |
