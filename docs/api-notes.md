@@ -140,10 +140,19 @@ Observado em `TestProbeOCCIsPerField` (mesmo projeto descartável) e lido em `ta
 
 `get_modified_fields` junta as chaves do `diff` das últimas `diff_versions` entradas do histórico. O conflito só
 existe quando as chaves enviadas cruzam as chaves alteradas desde a versão enviada; com `version` antiga e
-campos disjuntos, o PATCH é aceito e a `version` sobe. O histórico grava a lista **armazenada** de
-`assigned_users` (`userstory_freezer`), não a da resposta, e **não grava `assigned_to`**: em
+campos disjuntos, o PATCH é aceito e a `version` sobe. O histórico grava `assigned_users` a partir da lista
+**armazenada** (`userstory_freezer`), não da resposta, e **não grava `assigned_to`**: em
 `taiga/projects/history/services.py`, `_deprecated_fields = {"userstories.userstory": frozenset(["assigned_to"])}`
-tira o campo do `diff`. Uma troca só de `assigned_to` nem gera entrada no histórico (`TestProbeOCCIgnoresAssignedTo`).
+tira o campo do `diff`. Há uma exceção no freezer: com a lista armazenada **vazia**, o snapshot usa
+`[assigned_to]` como `assigned_users`
+(`if us.assigned_to_id and not assigned_users: assigned_users = [us.assigned_to_id]`). Então:
+
+- lista armazenada vazia: trocar ou limpar `assigned_to` muda o `assigned_users` do snapshot, gera entrada no
+  histórico e um PATCH antigo que envie `assigned_users` dá conflito;
+- lista armazenada com alguém: uma troca só de `assigned_to` não gera diff nenhum (nem entrada no histórico) e
+  nenhum PATCH antigo conflita por causa dela.
+
+Os dois casos estão em `TestProbeOCCIgnoresAssignedTo`.
 
 | Requisição (com `version` antiga, depois de outra pessoa gravar `blocked_note`) | Resultado |
 |---|---|
@@ -163,7 +172,7 @@ caso era o bloqueio (`--unblock` mandava só `is_blocked`, `--block` podia manda
 com o envio do par. Um PATCH com responsáveis continua sem repetição (a lista armazenada não aparece na
 releitura).
 
-**Limitação conhecida — `assigned_to`:** como o histórico ignora o campo, nenhum PATCH é protegido contra uma
+**Limitação conhecida — `assigned_to`:** como o histórico ignora o campo, com a lista armazenada não vazia nenhum PATCH é protegido contra uma
 troca concorrente do responsável principal, nem mandando `assigned_to` junto (testado: aceito). Efeitos
 possíveis numa corrida estreita: `--remove-assignee X` enquanto outra pessoa torna X principal sai com exit 0 e X
 continua mostrado; `--owner-assignee`/`--clear-owner-assignee` sobrescreve a troca concorrente. A troca da lista

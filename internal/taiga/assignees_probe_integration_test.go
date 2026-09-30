@@ -206,4 +206,16 @@ func TestProbeOCCIgnoresAssignedTo(t *testing.T) {
 		t.Fatalf("stale list write: %v", err)
 	}
 	t.Log("FINDING a stale PATCH of assigned_users conflicts after a concurrent change of the stored list")
+
+	// Exception: with an empty stored list, the history snapshot uses [assigned_to] as the list
+	// (userstory_freezer), so an owner change is recorded as assigned_users and does conflict.
+	s = createStory(t, c, p, "occ owner probe, empty list", map[string]any{"assigned_to": svc})
+	path = fmt.Sprintf("userstories/%d", s.int("id"))
+	stale = s.int("version")
+	probeDo(t, c, "PATCH", path, nil, map[string]any{"version": stale, "assigned_to": admin})
+	_, err = c.Do(context.Background(), Request{Method: "PATCH", Path: path, Body: map[string]any{"version": stale, "assigned_to": svc, "assigned_users": []int64{svc}}})
+	if probeStatus(err) != 400 {
+		t.Fatalf("stale write after owner change with empty stored list: %v", err)
+	}
+	t.Log("FINDING with an empty stored list, an owner change is recorded as assigned_users and a stale PATCH of the list conflicts")
 }
