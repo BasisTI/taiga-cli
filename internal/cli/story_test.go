@@ -157,6 +157,12 @@ func newStoryFake(t *testing.T) (*storyFake, *[]recorded) {
 		pageSize: 2,
 		fail:     map[string]int{},
 		nextID:   6900,
+		values: map[string]map[string]any{
+			"userstories/custom-attributes-values/6808": {"attributes_values": map[string]any{"27": true, "999": "orphan"}, "version": 19, "user_story": 6808},
+			"userstories/custom-attributes-values/6809": {"attributes_values": map[string]any{}, "version": 1, "user_story": 6809},
+			"userstories/custom-attributes-values/6810": {"attributes_values": map[string]any{}, "version": 1, "user_story": 6810},
+			"userstories/custom-attributes-values/7001": {"attributes_values": map[string]any{}, "version": 1, "user_story": 7001},
+		},
 	}
 	srv, calls := fakeTaiga(t, f.handle)
 	f.srv = srv.URL

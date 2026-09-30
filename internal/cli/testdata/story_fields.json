@@ -1,0 +1,37 @@
+{
+  "attributes_values": {
+    "27": true,
+    "999": "orphan"
+  },
+  "fields": [
+    {
+      "description": "",
+      "id": 27,
+      "name": "Testado em staging",
+      "order": 1,
+      "project": 37,
+      "type": "checkbox",
+      "value": true
+    },
+    {
+      "description": "prazo",
+      "id": 28,
+      "name": "Data de entrega",
+      "order": 2,
+      "project": 37,
+      "type": "date"
+    },
+    {
+      "description": "",
+      "id": 29,
+      "name": "Notas",
+      "order": 3,
+      "project": 37,
+      "type": "text"
+    }
+  ],
+  "id": 6808,
+  "ref": 246,
+  "url": "http://taiga.test/project/infra-2025/us/246",
+  "version": 19
+}

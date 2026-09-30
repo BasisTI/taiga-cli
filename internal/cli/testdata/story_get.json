@@ -2,6 +2,14 @@
   "assigned_users": [
     5
   ],
+  "custom_attributes": {
+    "attributes_values": {
+      "27": true,
+      "999": "orphan"
+    },
+    "user_story": 6808,
+    "version": 19
+  },
   "description": "",
   "epics": [
     {

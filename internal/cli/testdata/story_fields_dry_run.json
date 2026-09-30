@@ -1,0 +1,13 @@
+{
+  "dry_run": true,
+  "method": "PATCH",
+  "path": "userstories/custom-attributes-values/6808",
+  "body": {
+    "attributes_values": {
+      "27": true,
+      "29": "x",
+      "999": "orphan"
+    },
+    "version": 19
+  }
+}
