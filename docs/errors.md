@@ -28,7 +28,7 @@ Todo erro sai no stderr como `{"error":{"code","source","stage","cause","recover
 | `config_no_url` | 2 | `config` | nenhuma URL em flag, env, `.taiga.toml` ou config | `taiga auth login --url …`, `TAIGA_URL` ou `.taiga.toml` |
 | `config_invalid_url` | 2 | `config` | URL sem HTTPS (fora de localhost), com userinfo, query ou fragmento | usar `https://host` |
 | `auth_no_source` | 3 | `config` ou `env` | sem `TAIGA_TOKEN`, sem sessão e sem fonte de segredo | `taiga auth login` ou `TAIGA_TOKEN` |
-| `auth_untrusted_url` | 3 | `env` | `TAIGA_TOKEN`/`TAIGA_PASSWORD`/`TAIGA_PASSWORD_FILE` definidos e a URL veio só do `.taiga.toml`, sem host correspondente na config; nada é enviado | `TAIGA_URL`/`--url` com essa URL, ou `taiga auth login --url …` |
+| `auth_untrusted_url` | 3 | `env` ou `file` | `TAIGA_TOKEN`/`TAIGA_PASSWORD`/`TAIGA_PASSWORD_FILE` definidos, ou `taiga auth login` sem `--url`, e a URL veio só do `.taiga.toml`, sem host correspondente na config; nada é enviado | `TAIGA_URL`/`--url` com essa URL, ou `taiga auth login --url …` |
 | `auth_invalid_credentials` | 3 | `api` | `POST /auth` respondeu 400 ou 401 | conferir usuário e fonte de segredo |
 | `auth_rejected` | 3 | `api` | a API respondeu 401 a uma chamada autenticada | `taiga auth status --diagnose` |
 | `session_expired` | 3 | `session_cache` | refresh recusado, ou sessão vencida com o cache somente leitura (sandbox) | `taiga auth refresh` fora do sandbox, ou `taiga auth login` |

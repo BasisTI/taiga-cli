@@ -51,7 +51,9 @@ func (r *Resolver) Token(ctx context.Context) (taiga.Token, error) {
 		return bearer(sess), nil
 	}
 	unlock, lockErr := r.Store.Lock(ctx, r.ref())
-	readOnly := errors.Is(lockErr, ErrReadOnly)
+	// An existing lock file can be opened in a read-only directory, so probe the directory too:
+	// refreshing without being able to save would burn the rotated refresh token.
+	readOnly := errors.Is(lockErr, ErrReadOnly) || (lockErr == nil && !r.Store.Writable())
 	if lockErr != nil && !readOnly {
 		return taiga.Token{}, lockErr
 	}
@@ -72,7 +74,12 @@ func (r *Resolver) Token(ctx context.Context) (taiga.Token, error) {
 			return taiga.Token{}, err
 		}
 	}
-	if r.Secret == nil {
+	secret := r.Secret
+	if hadSession && readOnly {
+		// In a sandbox only an env password may log in again; the stored secret stays for `taiga auth refresh`.
+		secret = envOnly(secret)
+	}
+	if secret == nil {
 		if hadSession && readOnly {
 			return taiga.Token{}, &output.Error{Code: "session_expired", Source: "session_cache", Stage: r.Store.Path(r.ref()), Cause: "session expired and the session cache is read-only", Recovery: "run `taiga auth refresh` outside the sandbox", Exit: output.ExitAuth}
 		}
@@ -81,7 +88,7 @@ func (r *Resolver) Token(ctx context.Context) (taiga.Token, error) {
 		}
 		return taiga.Token{}, authErr("auth_no_source", "config", "no session and no secret source for "+r.Username, "run `taiga auth login`")
 	}
-	pw, err := r.Secret.Password(ctx)
+	pw, err := secret.Password(ctx)
 	if err != nil {
 		if hadSession && readOnly {
 			e := output.AsError(err)
@@ -170,4 +177,19 @@ func (r *Resolver) ForceRefresh(ctx context.Context) (Session, error) {
 		return Session{}, err
 	}
 	return r.LoginWith(ctx, pw)
+}
+
+// envOnly returns the env password source within s, or nil.
+func envOnly(s SecretSource) SecretSource {
+	switch v := s.(type) {
+	case EnvPassword:
+		return v
+	case FirstOf:
+		for _, src := range v {
+			if e, ok := src.(EnvPassword); ok {
+				return e
+			}
+		}
+	}
+	return nil
 }

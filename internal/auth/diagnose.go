@@ -50,7 +50,7 @@ func Diagnose(ctx context.Context, in DiagnoseInput) []Check {
 		add("keyring", "skipped", "")
 	} else if err := in.KeyringProbe(ctx); err != nil {
 		e := output.AsError(err)
-		add("keyring", "failed", e.Code+": "+e.Cause)
+		add("keyring", "failed", e.Code+": "+e.Cause+"; see README section \"Headless Linux keyring\"")
 	} else {
 		add("keyring", "ok", "org.freedesktop.secrets is available")
 	}

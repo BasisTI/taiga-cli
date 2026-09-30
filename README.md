@@ -56,7 +56,7 @@ The token for each call is resolved in this order:
 3. a refresh of the cached session, under a file lock so concurrent processes refresh once;
 4. a login with the configured secret: `TAIGA_PASSWORD` or `TAIGA_PASSWORD_FILE`, then `secret_command`, the keyring, or the `--insecure-storage` file.
 
-`TAIGA_TOKEN`, `TAIGA_PASSWORD` and `TAIGA_PASSWORD_FILE` are only sent to a URL given by `--url`, `TAIGA_URL` or the user config. A URL that comes only from a repository's `.taiga.toml` is refused with `auth_untrusted_url`, so a cloned repository cannot redirect your credentials.
+`TAIGA_TOKEN`, `TAIGA_PASSWORD` and `TAIGA_PASSWORD_FILE` are only sent to a URL given by `--url`, `TAIGA_URL` or the user config. A URL that comes only from a repository's `.taiga.toml` is refused with `auth_untrusted_url`, and so is `taiga auth login` without `--url` in that case, so a cloned repository cannot redirect your credentials.
 
 | Variable | Use |
 |---|---|
@@ -79,7 +79,7 @@ taiga auth status --diagnose --output text
 ## Coding agents and sandboxes
 
 - A person runs `taiga auth login` once per machine; agents only read the session cache and never see the password.
-- An agent that gets `session_expired` inside a sandbox cannot renew the session there: run `taiga auth refresh` outside the sandbox and retry. `taiga` never spends the stored refresh token when it cannot save the new one.
+- An agent that gets `session_expired` inside a sandbox cannot renew the session there: run `taiga auth refresh` outside the sandbox and retry. `taiga` never spends the stored refresh token when it cannot save the new one, and with a read-only cache it logs in again only with `TAIGA_PASSWORD`/`TAIGA_PASSWORD_FILE` (keeping that token in memory), never with the keyring or `secret_command`.
 - Codex: enable `network_access = true` and add the state dir to `writable_roots`:
 
 ```toml

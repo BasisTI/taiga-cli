@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,6 +47,10 @@ func (a *App) authLoginCmd() *cobra.Command {
 			rc, err := a.runContext()
 			if err != nil {
 				return err
+			}
+			if _, known := rc.File.Host(rc.Ctx.URL.Value); !known && strings.HasPrefix(rc.Ctx.URL.Source, "file:") {
+				// A cloned repository must not choose where the typed password goes.
+				return &output.Error{Code: "auth_untrusted_url", Source: "file", Stage: strings.TrimPrefix(rc.Ctx.URL.Source, "file:"), Cause: "refusing to send the password to " + rc.Ctx.URL.Value + ": the URL comes only from .taiga.toml", Recovery: "run `taiga auth login --url " + rc.Ctx.URL.Value + "` if you trust it", Exit: output.ExitAuth}
 			}
 			var pw []byte
 			switch {
@@ -261,9 +267,14 @@ func (a *App) authLogoutCmd() *cobra.Command {
 			host, _ := rc.File.Host(r.URL)
 			switch host.SecretSource {
 			case "keyring":
-				_ = auth.Keyring{Ref: ref}.Delete(cmd.Context())
+				// The session is gone already; a secret that could not be deleted must not look like success.
+				if err := (auth.Keyring{Ref: ref}).Delete(cmd.Context()); err != nil && output.AsError(err).Code != "secret_missing" {
+					return err
+				}
 			case "file":
-				_ = os.Remove(filepath.Join(rc.Paths.SecretsDir, ref))
+				if err := os.Remove(filepath.Join(rc.Paths.SecretsDir, ref)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return err
+				}
 			}
 			_, err = io.WriteString(a.Out, "logged out of "+r.URL+" ("+r.Username+")\n")
 			return err

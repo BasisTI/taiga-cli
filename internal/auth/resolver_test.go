@@ -125,6 +125,10 @@ func readOnlyStateDir(t *testing.T, sess *Session, ref string) string {
 		_ = Store{Dir: dir}.Save(ref, *sess)
 	}
 	_ = os.MkdirAll(filepath.Join(dir, "sessions"), 0o700)
+	if ref != "" {
+		// The lock file exists after any earlier refresh outside the sandbox.
+		_ = os.WriteFile(filepath.Join(dir, "sessions", ref+".lock"), nil, 0o600)
+	}
 	_ = os.Chmod(filepath.Join(dir, "sessions"), 0o500)
 	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, "sessions"), 0o700) })
 	return dir
@@ -182,7 +186,7 @@ func TestReadOnlyExpiredSessionWithPasswordDoesNotBurnRefresh(t *testing.T) {
 	f.valid.Store("r0", true)
 	dir := readOnlyStateDir(t, &Session{URL: f.srv.URL, Username: "svc", AuthToken: "old", Refresh: "r0", Expiry: time.Now().Add(-time.Hour)}, ref)
 	var warned string
-	r := newResolver(f, dir, staticSecret("pw"))
+	r := newResolver(f, dir, FirstOf{EnvPassword{Env: func(k string) string { return map[string]string{"TAIGA_PASSWORD": "pw"}[k] }}})
 	r.Warn = func(code, _ string) { warned = code }
 	if _, err := r.Token(context.Background()); err != nil {
 		t.Fatal(err)
@@ -214,5 +218,19 @@ func TestForceRefreshOnReadOnlyStoreIsTypedError(t *testing.T) {
 	_, err := newResolver(f, dir, staticSecret("pw")).ForceRefresh(context.Background())
 	if e := output.AsError(err); e.Code != "session_cache_readonly" || e.Exit != output.ExitAuth {
 		t.Fatalf("%+v", e)
+	}
+}
+
+// Review: with a read-only cache, only an env password may log in again; the stored
+// secret (keyring, secret_command, file) must not turn every command into a login.
+func TestReadOnlyExpiredSessionWithStoredSecretIsSessionExpired(t *testing.T) {
+	f := newFakeAuth(t)
+	ref := SessionRef(f.srv.URL, "svc")
+	f.valid.Store("r0", true)
+	dir := readOnlyStateDir(t, &Session{URL: f.srv.URL, Username: "svc", AuthToken: "old", Refresh: "r0", Expiry: time.Now().Add(-time.Hour)}, ref)
+	_, err := newResolver(f, dir, staticSecret("pw")).Token(context.Background())
+	e := output.AsError(err)
+	if e.Code != "session_expired" || e.Recovery != "run `taiga auth refresh` outside the sandbox" || f.logins != 0 || f.refreshes != 0 {
+		t.Fatalf("%+v logins=%d refreshes=%d", e, f.logins, f.refreshes)
 	}
 }

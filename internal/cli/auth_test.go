@@ -111,3 +111,24 @@ func TestLoginRollsBackSessionWhenKeyringFails(t *testing.T) {
 		t.Fatal("config written after the keyring failed")
 	}
 }
+
+func TestLoginRefusesRepoOnlyURL(t *testing.T) {
+	url := authServer(t)
+	env := map[string]string{"HOME": t.TempDir()}
+	_, errOut, code := runInRepo(t, env, "url = \""+url+"\"\n", "auth", "login", "--username", "svc", "--password-stdin", "--insecure-storage", "--output", "json")
+	if code != 3 || !strings.Contains(errOut, "auth_untrusted_url") {
+		t.Fatalf("code=%d err=%s", code, errOut)
+	}
+}
+
+func TestLogoutReportsKeyringDeleteFailure(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(t.TempDir(), "no-bus"))
+	home := t.TempDir()
+	cfg := filepath.Join(home, ".config", "taiga", "config.toml")
+	_ = os.MkdirAll(filepath.Dir(cfg), 0o700)
+	_ = os.WriteFile(cfg, []byte("default_host = \"http://127.0.0.1:1\"\n[[hosts]]\nurl = \"http://127.0.0.1:1\"\nusername = \"svc\"\nsecret_source = \"keyring\"\n"), 0o600)
+	out, errOut, code := runIn(t, map[string]string{"HOME": home}, "", "auth", "logout", "--output", "json")
+	if code != 3 || !strings.Contains(errOut, "keyring") || strings.Contains(out, "logged out") {
+		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+	}
+}
