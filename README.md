@@ -37,7 +37,7 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 | Command | What it does |
 |---|---|
 | `taiga story list [--ref N] [--status S] [--assignee USER\|me] [--epic REF] [--tag T]... [--search TEXT] [--closed[=false]]` | Every matching story, without manual paging. Repeated `--tag` must all match |
-| `taiga story get REF` / `taiga story get --id ID` | One story, with its web `url` and its `custom_attributes` (values with their own `version`) |
+| `taiga story get REF` / `taiga story get --id ID` | One story, with its web `url`; JSON output also carries `custom_attributes` (values with their own `version`) |
 | `taiga story create --subject S [--description-file F\|-] [--status S] [--tag T]... [--swimlane L] [--assignee USER]...` | Create a story |
 | `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L] [--add-assignee USER]... [--remove-assignee USER]... [--owner-assignee USER\|--clear-owner-assignee] [--block NOTE\|--unblock]` | Send only the fields that change, with the story `version` |
 | `taiga story close REF [--status S]` | Move to a closed status; never archives or deletes |

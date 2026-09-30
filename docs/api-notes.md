@@ -219,7 +219,10 @@ descartável `cli-test-probe-fields`, onde `svc` é membro sem ser admin. Testes
 
 Consequência na CLI: `field create` é idempotente pela leitura do catálogo antes do `POST`; se outro processo criar a
 mesma definição entre a leitura e o `POST`, o 400 em `name` faz a CLI reler e aceitar a definição só se for
-compatível (mesmo tipo e, se `--description` foi dado, mesma descrição). O `POST` nunca é repetido. Definições
+compatível (mesmo tipo e, se `--description` foi dado, mesma descrição). O `POST` nunca é repetido. Limite não
+sondado: se os dois `POST` passarem juntos pelo validador, quem recusa é o `unique_together` do banco, o que pode
+virar 500 (`server_error`, exit 7) em vez do 400; a unicidade continua garantida e repetir o comando encontra a
+definição. A CLI também recusa `=` no nome, porque `story field set` corta a atribuição no primeiro `=`. Definições
 existentes nunca são alteradas nem apagadas.
 
 ### Valores
@@ -234,7 +237,7 @@ existentes nunca são alteradas nem apagadas.
 | **`version` antiga**, com o dicionário alterado desde então | **aceito (200)**, sobrescrevendo o que outra pessoa gravou: o OCC deste recurso nunca acusa conflito (abaixo) |
 | `null` em date/checkbox, `""` em date, `"yes"` em checkbox, `"30/09/2026"` em date | aceitos e gravados como enviados: o servidor **não valida o valor pelo tipo** |
 | `attributes_values: {}` | 400 `"This field cannot be blank."` — não dá para esvaziar o dicionário |
-| id que não é definição do projeto | 400 `"It contains invalid custom fields."` |
+| id que não é definição do projeto | 400 `"It contains invalid custom fields."`. Chave órfã não surge pelo caminho normal: apagar uma definição dispara `clean_key_in_custom_attributes_values`, que tira a chave de todos os valores (`custom_attributes/migrations/0003_triggers_on_delete_customattribute.py`). A CLI preserva chaves sem definição no merge; se uma existir, o servidor recusa o `PATCH` (`invalid_request`, exit 2) |
 | membro sem admin (`svc`) | grava valores (`modify_us`); não membro de projeto privado: 403 |
 | `tasks/by_ref?project=<id>&ref=<n>` | 200 com a task do projeto, como em stories |
 

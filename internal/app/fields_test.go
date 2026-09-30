@@ -20,7 +20,7 @@ func TestFieldPathsAndValidation(t *testing.T) {
 		}
 	}
 	// Taiga also has multiline, richtext, url, dropdown and number: not validated yet.
-	for _, tc := range [][2]string{{"", "text"}, {" ", "date"}, {"x", "unknown"}, {"x", "number"}, {"x", "dropdown"}, {"x", ""},
+	for _, tc := range [][2]string{{"", "text"}, {" ", "date"}, {"x", "unknown"}, {"x", "number"}, {"x", "dropdown"}, {"x", ""}, {"Notas=interno", "text"},
 		{"12345678901234567890123456789012345678901234567890123456789012345", "text"}} {
 		if err := ValidateField(tc[0], tc[1]); exitOf(err) != 2 {
 			t.Fatalf("accepted %v: %v", tc, err)

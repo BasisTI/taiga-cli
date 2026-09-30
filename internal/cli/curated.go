@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/BasisTI/taiga-cli/internal/app"
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -72,7 +74,11 @@ func (a *App) renderKeys(v any, textKeys []string) error {
 			if names, ok := val.([]string); ok {
 				val = strings.Join(names, ", ")
 			}
-			fields = append(fields, output.Field{Key: k, Value: fmt.Sprint(val)})
+			text := fmt.Sprint(val)
+			if strings.ContainsFunc(text, unicode.IsControl) {
+				text = strconv.Quote(text) // one line per key: a line break cannot forge another key
+			}
+			fields = append(fields, output.Field{Key: k, Value: text})
 		}
 		return output.WriteFields(a.Out, fields)
 	case []app.Object:

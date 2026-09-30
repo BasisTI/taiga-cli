@@ -111,6 +111,9 @@ func (f *storyFake) handleValues(w http.ResponseWriter, r *http.Request, path st
 	}
 	v["attributes_values"] = values
 	v["version"] = v["version"].(int) + 1
+	if f.onPatchValues != nil {
+		f.onPatchValues(v)
+	}
 	if f.badValuesWrite {
 		_, _ = fmt.Fprint(w, `<html>proxy</html>`)
 		return

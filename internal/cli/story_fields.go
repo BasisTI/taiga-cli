@@ -109,7 +109,7 @@ func (a *App) renderStoryFields(ctx context.Context, service *app.Service, story
 		if v, ok := f["value"]; ok {
 			value = jsonValue(v)
 		}
-		lines = append(lines, output.Field{Key: fmt.Sprintf("%v (%v)", f["name"], f["type"]), Value: value})
+		lines = append(lines, output.Field{Key: fmt.Sprintf("%s (%s)", jsonValue(f["name"]), jsonValue(f["type"])), Value: value})
 	}
 	stored, _ := values["attributes_values"].(map[string]any)
 	for _, id := range sortedKeys(stored) {
@@ -120,10 +120,11 @@ func (a *App) renderStoryFields(ctx context.Context, service *app.Service, story
 	return output.WriteFields(a.Out, lines)
 }
 
-// jsonValue prints plain text as is; text with control characters (line breaks included)
-// and any other value print as JSON, so each field stays on one line.
+// jsonValue prints plain text as is; empty text, text with control characters (line breaks
+// included) and any other value print as JSON, so each field stays on one line and a stored ""
+// differs from a field without value.
 func jsonValue(v any) string {
-	if s, ok := v.(string); ok && !strings.ContainsFunc(s, unicode.IsControl) {
+	if s, ok := v.(string); ok && s != "" && !strings.ContainsFunc(s, unicode.IsControl) {
 		return s
 	}
 	b, err := json.Marshal(v)

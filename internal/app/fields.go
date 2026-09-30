@@ -27,10 +27,14 @@ func FieldPath(kind string) (string, error) {
 // has multiline, richtext, url, dropdown and number; they wait for their own validation.
 var fieldTypes = map[string]bool{"text": true, "date": true, "checkbox": true}
 
-// ValidateField checks a definition before any request. Taiga limits names to 64 characters.
+// ValidateField checks a definition before any request. Taiga limits names to 64 characters;
+// "=" is refused because Name=value assignments end the name at the first "=".
 func ValidateField(name, typ string) error {
 	if strings.TrimSpace(name) == "" {
 		return Usage("field name is required")
+	}
+	if strings.Contains(name, "=") {
+		return Usage("field name cannot contain \"=\": story field set could not address it by name")
 	}
 	if utf8.RuneCountInString(name) > 64 {
 		return Usage("field name is longer than 64 characters")

@@ -224,3 +224,68 @@ func TestStoryGetCarriesTheValuesWithTheirOwnVersion(t *testing.T) {
 		t.Fatalf("%s", out)
 	}
 }
+
+// The answer has the next version but not the dictionary sent: reported as applied.
+func TestStoryFieldSetDetectsValuesThatDifferFromTheRequest(t *testing.T) {
+	f, calls := fieldFake(t)
+	f.onPatchValues = func(v map[string]any) { v["attributes_values"] = map[string]any{"27": true} }
+	_, stderr, code := runIn(t, f.env(), "", "story", "field", "set", "246", "Notas=x")
+	if code != 4 || !strings.Contains(stderr, "the values differ from the request") || len(writes(calls)) != 1 {
+		t.Fatalf("%d %s", code, stderr)
+	}
+}
+
+// Someone writes right after our PATCH: the answer shows our write, so the later one in the
+// re-read is not reported as a conflict.
+func TestStoryFieldSetIgnoresAWriteAfterOurs(t *testing.T) {
+	f, _ := fieldFake(t)
+	patched := false
+	f.onValues = func(method string, v map[string]any) {
+		if method == "PATCH" {
+			patched = true
+		} else if patched {
+			v["attributes_values"] = map[string]any{"27": false}
+			v["version"] = 21
+		}
+	}
+	out, stderr, code := runIn(t, f.env(), "", "story", "field", "set", "246", "Notas=x")
+	if code != 0 || !strings.Contains(out, `"version": 21`) {
+		t.Fatalf("%d %s %s", code, stderr, out)
+	}
+}
+
+func TestStoryFieldValuesOfAnotherStoryAreRefused(t *testing.T) {
+	f, calls := fieldFake(t)
+	f.values[values6808]["user_story"] = 6809
+	_, stderr, code := runIn(t, f.env(), "", "story", "field", "set", "246", "Notas=x")
+	if code != 1 || !strings.Contains(stderr, "values of another story") || len(writes(calls)) != 0 {
+		t.Fatalf("%d %s", code, stderr)
+	}
+}
+
+func TestStoryFieldTextKeepsOneLinePerField(t *testing.T) {
+	f, _ := fieldFake(t)
+	f.defs["userstory-custom-attributes"][0]["name"] = "Linha\nversion: 99"
+	f.defs["userstory-custom-attributes"][0]["description"] = "a\nb"
+	f.values[values6808]["attributes_values"] = map[string]any{"27": true, "29": ""}
+	out, _, code := runIn(t, f.env(), "", "story", "field", "list", "246", "--output", "text")
+	if code != 0 || strings.Contains(out, "\nversion: 99") || !strings.Contains(out, `"Linha\nversion: 99" (checkbox):`) {
+		t.Fatalf("%d\n%s", code, out)
+	}
+	if !strings.Contains(out, "Notas (text):") || !strings.HasSuffix(lineOf(out, "Notas (text):"), `""`) || strings.TrimSpace(strings.TrimPrefix(lineOf(out, "Data de entrega (date):"), "Data de entrega (date):")) != "" {
+		t.Fatalf("stored empty text must differ from no value:\n%s", out)
+	}
+	list, _, code := runIn(t, f.env(), "", "field", "list", "--kind", "story", "--output", "text")
+	if code != 0 || strings.Contains(list, "\nb\n") || !strings.Contains(list, `"a\nb"`) {
+		t.Fatalf("%d\n%s", code, list)
+	}
+}
+
+func lineOf(text, prefix string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return line
+		}
+	}
+	return ""
+}

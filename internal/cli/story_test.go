@@ -125,6 +125,8 @@ type storyFake struct {
 	onDefPost func()
 	// onValues runs on each GET or PATCH of a values resource, before it is handled.
 	onValues func(method string, v map[string]any)
+	// onPatchValues runs on the stored values after a PATCH is applied, before the answer.
+	onPatchValues func(v map[string]any)
 	// badValuesWrite makes a successful values PATCH answer with a body that is not JSON.
 	badValuesWrite bool
 }
