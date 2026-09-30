@@ -77,7 +77,9 @@ func changedKeys(patch map[string]any, a, b map[string]json.RawMessage) []string
 		if k == "version" {
 			continue
 		}
-		if !jsonEqual(a[k], b[k]) {
+		va, inA := a[k]
+		vb, inB := b[k]
+		if inA != inB || !jsonEqual(va, vb) {
 			out = append(out, k)
 		}
 	}
@@ -85,8 +87,9 @@ func changedKeys(patch map[string]any, a, b map[string]json.RawMessage) []string
 	return out
 }
 
-// jsonEqual compares two JSON values semantically: object key order and whitespace do not
-// matter, numbers compare exactly (UseNumber), and a missing value equals null.
+// jsonEqual compares two present JSON values semantically: object key order and whitespace do
+// not matter and numbers compare exactly (UseNumber). Callers compare key presence first, so a
+// missing field never equals an explicit null.
 func jsonEqual(x, y json.RawMessage) bool {
 	vx, okx := decodeJSON(x)
 	vy, oky := decodeJSON(y)
@@ -94,9 +97,6 @@ func jsonEqual(x, y json.RawMessage) bool {
 }
 
 func decodeJSON(raw json.RawMessage) (any, bool) {
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil, true
-	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var v any

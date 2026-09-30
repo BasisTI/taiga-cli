@@ -170,18 +170,37 @@ func TestChangedKeysComparesJSONSemantically(t *testing.T) {
 	a := map[string]json.RawMessage{
 		"custom": json.RawMessage(`{"a":1,"b":[1,{"x":true,"y":null}]}`),
 		"n":      json.RawMessage(`12345678901234567890`),
-		"gone":   json.RawMessage(`null`),
 	}
 	b := map[string]json.RawMessage{
 		"custom": json.RawMessage(`{ "b": [1, {"y": null, "x": true}], "a": 1 }`),
 		"n":      json.RawMessage(`12345678901234567890`),
 	}
-	patch := map[string]any{"custom": 0, "n": 0, "gone": 0}
+	patch := map[string]any{"custom": 0, "n": 0}
 	if got := changedKeys(patch, a, b); len(got) != 0 {
 		t.Fatalf("same JSON in another key order must not conflict: %v", got)
 	}
 	b["n"] = json.RawMessage(`12345678901234567891`)
 	if got := changedKeys(patch, a, b); len(got) != 1 || got[0] != "n" {
 		t.Fatalf("big integers must compare exactly: %v", got)
+	}
+}
+
+func TestChangedKeysDistinguishesMissingFromNull(t *testing.T) {
+	null := json.RawMessage(`null`)
+	cases := []struct {
+		name     string
+		a, b     map[string]json.RawMessage
+		conflict bool
+	}{
+		{"missing to null", map[string]json.RawMessage{}, map[string]json.RawMessage{"f": null}, true},
+		{"null to missing", map[string]json.RawMessage{"f": null}, map[string]json.RawMessage{}, true},
+		{"missing to missing", map[string]json.RawMessage{}, map[string]json.RawMessage{}, false},
+		{"null to null", map[string]json.RawMessage{"f": null}, map[string]json.RawMessage{"f": null}, false},
+	}
+	for _, c := range cases {
+		got := changedKeys(map[string]any{"f": 1}, c.a, c.b)
+		if (len(got) == 1) != c.conflict {
+			t.Errorf("%s: changed=%v, want conflict=%v", c.name, got, c.conflict)
+		}
 	}
 }
