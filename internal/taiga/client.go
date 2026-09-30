@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -100,7 +101,7 @@ func (c *Client) Do(ctx context.Context, r Request) (*Response, error) {
 		}
 		req, err := http.NewRequestWithContext(ctx, r.Method, target, bytes.NewReader(payload))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%s %s: invalid request URL", r.Method, stagePath(r.Path))
 		}
 		for k, vs := range r.Header {
 			for _, v := range vs {

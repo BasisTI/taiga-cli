@@ -17,10 +17,10 @@ func (c *Client) getObject(ctx context.Context, path string) (map[string]json.Ra
 	}
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(resp.Body, &m); err != nil {
-		return nil, fmt.Errorf("GET %s: expected a JSON object: %w", path, err)
+		return nil, fmt.Errorf("GET %s: expected a JSON object: %w", stagePath(path), err)
 	}
 	if _, ok := m["version"]; !ok {
-		return nil, fmt.Errorf("GET %s: resource has no version field", path)
+		return nil, fmt.Errorf("GET %s: resource has no version field", stagePath(path))
 	}
 	return m, nil
 }
@@ -36,7 +36,7 @@ func withVersion(patch map[string]any, version json.RawMessage) map[string]any {
 
 // PrepareVersioned reads the resource and returns the body that would be sent (for --dry-run).
 func (c *Client) PrepareVersioned(ctx context.Context, path string, patch map[string]any) (map[string]any, map[string]json.RawMessage, error) {
-	cur, err := c.getObject(ctx, path)
+	cur, err := c.getObject(ctx, stagePath(path))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -45,7 +45,7 @@ func (c *Client) PrepareVersioned(ctx context.Context, path string, patch map[st
 
 // WriteVersioned applies patch with optimistic concurrency and one guarded retry.
 func (c *Client) WriteVersioned(ctx context.Context, method, path string, patch map[string]any, force bool) (*Response, error) {
-	body, first, err := c.PrepareVersioned(ctx, path, patch)
+	body, first, err := c.PrepareVersioned(ctx, stagePath(path), patch)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func (c *Client) WriteVersioned(ctx context.Context, method, path string, patch 
 	if err == nil || !errors.As(err, &ae) || !ae.IsVersionConflict() {
 		return resp, err
 	}
-	second, err := c.getObject(ctx, path)
+	second, err := c.getObject(ctx, stagePath(path))
 	if err != nil {
 		return nil, err
 	}

@@ -26,12 +26,12 @@ func (c *Client) GetAll(ctx context.Context, path string, q url.Values) ([]json.
 		}
 		var items []json.RawMessage
 		if err := json.Unmarshal(resp.Body, &items); err != nil {
-			return nil, fmt.Errorf("GET %s: expected a JSON array: %w", path, err)
+			return nil, fmt.Errorf("GET %s: expected a JSON array: %w", stagePath(path), err)
 		}
 		all = append(all, items...)
 		if resp.Header.Get("x-pagination-next") == "" {
 			return all, nil
 		}
 	}
-	return nil, fmt.Errorf("GET %s: more than 1000 pages", path)
+	return nil, fmt.Errorf("GET %s: more than 1000 pages", stagePath(path))
 }

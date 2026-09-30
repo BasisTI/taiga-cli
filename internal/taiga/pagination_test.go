@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -34,5 +35,15 @@ func TestGetAllRejectsNonArray(t *testing.T) {
 	c := New(srv.URL, StaticToken{}, WithRetryWait(0))
 	if _, err := c.GetAll(context.Background(), "userstories/1", nil); err == nil {
 		t.Fatal("expected error for non-array")
+	}
+}
+
+func TestGetAllErrorDoesNotEchoQueryInPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = fmt.Fprint(w, `{"id":1}`) }))
+	defer srv.Close()
+	c := New(srv.URL, StaticToken{}, WithRetryWait(0))
+	_, err := c.GetAll(context.Background(), "userstories?token=SENTINEL", nil)
+	if err == nil || strings.Contains(err.Error(), "SENTINEL") {
+		t.Fatalf("err = %v", err)
 	}
 }

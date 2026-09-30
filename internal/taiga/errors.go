@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/BasisTI/taiga-cli/internal/output"
 )
@@ -16,7 +18,7 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	return fmt.Sprintf("%s %s: HTTP %d: %s", e.Method, e.Path, e.Status, truncate(e.Body))
+	return fmt.Sprintf("%s %s: HTTP %d: %s", e.Method, stagePath(e.Path), e.Status, truncate(e.Body))
 }
 
 // IsVersionConflict reports Taiga's optimistic-concurrency rejection (409, or 400 with a "version" key).
@@ -41,7 +43,9 @@ type NetworkError struct {
 	Err          error
 }
 
-func (e *NetworkError) Error() string { return fmt.Sprintf("%s %s: %v", e.Method, e.Path, e.Err) }
+func (e *NetworkError) Error() string {
+	return fmt.Sprintf("%s %s: %s", e.Method, stagePath(e.Path), transportCause(e.Err))
+}
 func (e *NetworkError) Unwrap() error { return e.Err }
 
 // ConflictError means another writer changed the fields we are updating.
@@ -51,7 +55,25 @@ type ConflictError struct {
 }
 
 func (e *ConflictError) Error() string {
-	return fmt.Sprintf("%s %s: version conflict on %v", e.Method, e.Path, e.Fields)
+	return fmt.Sprintf("%s %s: version conflict on %v", e.Method, stagePath(e.Path), e.Fields)
+}
+
+// stagePath drops any query or fragment from an API path: their values may carry secrets
+// and must never reach the error envelope.
+func stagePath(p string) string {
+	if i := strings.IndexAny(p, "?#"); i >= 0 {
+		return p[:i]
+	}
+	return p
+}
+
+// transportCause describes a transport failure without the request URL (which carries the query).
+func transportCause(err error) string {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err.Error()
+	}
+	return err.Error()
 }
 
 func truncate(b []byte) string {
@@ -69,7 +91,7 @@ func ToOutput(err error) *output.Error {
 	}
 	var ne *NetworkError
 	if errors.As(err, &ne) {
-		return &output.Error{Code: "network_error", Source: "network", Stage: ne.Method + " " + ne.Path, Cause: ne.Err.Error(), Recovery: "check connectivity to the Taiga URL (sandboxed agents need network access)", Exit: output.ExitNetwork}
+		return &output.Error{Code: "network_error", Source: "network", Stage: ne.Method + " " + stagePath(ne.Path), Cause: transportCause(ne.Err), Recovery: "check connectivity to the Taiga URL (sandboxed agents need network access)", Exit: output.ExitNetwork}
 	}
 	var ce *ConflictError
 	if errors.As(err, &ce) {
@@ -77,13 +99,13 @@ func ToOutput(err error) *output.Error {
 		if len(ce.Fields) > 0 {
 			cause = fmt.Sprintf("fields changed by someone else: %v", ce.Fields)
 		}
-		return &output.Error{Code: "version_conflict", Source: "api", Stage: ce.Method + " " + ce.Path, Cause: cause, Recovery: "re-read the resource and retry; use --force-version to override", Exit: output.ExitConflict}
+		return &output.Error{Code: "version_conflict", Source: "api", Stage: ce.Method + " " + stagePath(ce.Path), Cause: cause, Recovery: "re-read the resource and retry; use --force-version to override", Exit: output.ExitConflict}
 	}
 	var ae *APIError
 	if !errors.As(err, &ae) {
 		return output.AsError(err)
 	}
-	e := &output.Error{Source: "api", Stage: ae.Method + " " + ae.Path, Cause: truncate(ae.Body)}
+	e := &output.Error{Source: "api", Stage: ae.Method + " " + stagePath(ae.Path), Cause: truncate(ae.Body)}
 	switch {
 	case ae.Status == 401:
 		e.Code, e.Exit, e.Recovery = "auth_rejected", output.ExitAuth, "run `taiga auth status --diagnose`"
