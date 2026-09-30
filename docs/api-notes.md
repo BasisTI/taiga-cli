@@ -182,8 +182,9 @@ A CLI mitiga em `story update` com responsáveis (decisão humana de 2026-09-30:
    usuário ver;
 2. **pós-condição depois do PATCH:** relê e confere contra o pedido: quem devia entrar está, quem devia sair não
    está, o responsável principal é o pedido (ou o de antes), e ninguém da releitura sumiu sem ser removido. Também
-   exige que a resposta do PATCH seja a `version` seguinte à da releitura; um salto indica outra escrita no meio,
-   inclusive uma troca de `assigned_to` que não deixa rastro. Se algo não bate, sai com
+   exige que a resposta do PATCH seja a `version` seguinte à da releitura (se a resposta não decodificar, vale a
+   `version` da releitura pós-escrita, com a mesma exigência; a checagem nunca é pulada); um salto indica outra
+   escrita no meio, inclusive uma troca de `assigned_to` que não deixa rastro. Se algo não bate, sai com
    `assignees_postcondition_failed` (exit 4), dizendo que a escrita **foi aplicada**, com o estado encontrado. Não
    há repetição automática.
 
