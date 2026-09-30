@@ -176,8 +176,24 @@ func (s *Service) Write(ctx context.Context, path string, before, patch Object, 
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.API.WriteVersionedFrom(ctx, "PATCH", path, patch, raw, force); err != nil {
+	resp, err := s.API.WriteVersionedFrom(ctx, "PATCH", path, patch, raw, force)
+	if err != nil {
 		return nil, taiga.ToOutput(err)
 	}
-	return Read(ctx, s.API, path, nil)
+	return reread(ctx, s.API, path, resp)
+}
+
+// reread returns the resource after a successful write. If the GET fails, the write response
+// is returned instead: reporting a failure would invite a re-run that repeats the write.
+func reread(ctx context.Context, api API, path string, written *taiga.Response) (Object, error) {
+	o, err := Read(ctx, api, path, nil)
+	if err == nil {
+		return o, nil
+	}
+	if written != nil {
+		if w, derr := Decode(written.Body); derr == nil {
+			return w, nil
+		}
+	}
+	return nil, err
 }

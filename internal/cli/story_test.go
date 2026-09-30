@@ -60,6 +60,10 @@ func TestStoryRejectsInvalidSelectorsAndConflictingFlags(t *testing.T) {
 		{"story", "get", "abc"},
 		{"story", "get", "--id", "0"},
 		{"story", "list", "--ref", "-1"},
+		{"story", "list", "--status", ""},
+		{"story", "list", "--assignee", " "},
+		{"story", "list", "--epic", ""},
+		{"story", "list", "--search", ""},
 		{"story", "update", "246", "--tag", "a", "--add-tag", "b"},
 		{"story", "update", "246", "--add-tag", "a", "--remove-tag", "a"},
 		{"story", "update", "246", "--add-tag", "A", "--remove-tag", "a"},
@@ -641,5 +645,21 @@ func TestStoryConcurrentChangeOfMergedFieldConflicts(t *testing.T) {
 	}
 	if b, _ := json.Marshal(f.stories[6808]["tags"]); string(b) != `[["theirs",null]]` {
 		t.Fatalf("concurrent tags overwritten: %s", b)
+	}
+}
+
+// Once the write succeeded, a failed re-read must not look like a failed write (re-running
+// would duplicate the story or the appended text): the write response is printed instead.
+func TestStoryWriteSucceedsWhenRereadFails(t *testing.T) {
+	f, calls := newStoryFake(t)
+	f.fail["GET userstories/6901"] = 503
+	out, stderr, code := runIn(t, f.env(), "", "story", "create", "--subject", "Nova")
+	if code != 0 || !strings.Contains(out, `"id": 6901`) || !strings.Contains(out, `"url"`) || len(writes(calls)) != 1 {
+		t.Fatalf("create: %d %s %s", code, out, stderr)
+	}
+	f.fail["GET userstories/6808"] = 503
+	out, stderr, code = runIn(t, f.env(), "", "story", "update", "246", "--append-description", "fim")
+	if code != 0 || !strings.Contains(out, `"description": "fim"`) || len(writes(calls)) != 2 {
+		t.Fatalf("update: %d %s %s", code, out, stderr)
 	}
 }

@@ -84,6 +84,11 @@ func (a *App) storyListCmd() *cobra.Command {
 				return err
 			}
 		}
+		for _, name := range []string{"status", "assignee", "epic", "search"} {
+			if cmd.Flags().Changed(name) && strings.TrimSpace(cmd.Flags().Lookup(name).Value.String()) == "" {
+				return app.Usage("--" + name + " cannot be blank")
+			}
+		}
 		names, err := tagNames("--tag", tags)
 		if err != nil {
 			return err
