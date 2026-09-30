@@ -1,0 +1,4 @@
+dist/
+/taiga
+*.test
+coverage.out
