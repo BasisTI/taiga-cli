@@ -31,6 +31,18 @@ type secret struct {
 	ContentType string
 }
 
+// keyringTimeout bounds every Secret Service operation.
+var keyringTimeout = 5 * time.Second
+
+// connectCause reports a connection that ran out of time as the deadline itself:
+// godbus returns its own error when the bus accepts but never completes the handshake.
+func connectCause(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
 func storeError(stage string, cause error) error {
 	code := "keyring_unavailable"
 	message := "cannot reach the Secret Service"
@@ -90,11 +102,11 @@ func (k Keyring) Delete(ctx context.Context) error {
 
 // Available reports whether a Secret Service owns its name on the session bus.
 func (Keyring) Available(parent context.Context) error {
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, keyringTimeout)
 	defer cancel()
 	conn, e := dbus.ConnectSessionBus(dbus.WithContext(ctx))
 	if e != nil {
-		return storeError("connect", e)
+		return storeError("connect", connectCause(ctx, e))
 	}
 	defer func() { _ = conn.Close() }()
 	var owned bool
@@ -112,11 +124,11 @@ func (k Keyring) operation(parent context.Context, op string, value []byte) ([]b
 	if ref == "" {
 		return nil, authErr("secret_missing", "keyring", "missing credential reference", keyringRecovery)
 	}
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, keyringTimeout)
 	defer cancel()
 	conn, e := dbus.ConnectSessionBus(dbus.WithContext(ctx))
 	if e != nil {
-		return nil, storeError("connect", e)
+		return nil, storeError("connect", connectCause(ctx, e))
 	}
 	defer func() { _ = conn.Close() }()
 	obj := conn.Object(service, root)

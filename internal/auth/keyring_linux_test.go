@@ -7,9 +7,12 @@ package auth
 import (
 	"bufio"
 	"context"
+	"net"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/BasisTI/taiga-cli/internal/output"
 	"github.com/godbus/dbus/v5"
@@ -204,5 +207,33 @@ func TestKeyringErrorsAreAuthErrorsWithRecovery(t *testing.T) {
 	e := output.AsError((Keyring{Ref: "test-ref"}).Put(context.Background(), []byte("fake")))
 	if e.Exit != output.ExitAuth || e.Source != "keyring" || e.Recovery != keyringRecovery {
 		t.Fatalf("%+v", e)
+	}
+}
+
+// Codex review #5: a bus that accepts the connection and never answers is a timeout.
+func TestKeyringStalledBusIsTimeout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bus")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	go func() {
+		if c, err := ln.Accept(); err == nil {
+			t.Cleanup(func() { _ = c.Close() })
+		}
+	}()
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+path)
+	old := keyringTimeout
+	keyringTimeout = 300 * time.Millisecond
+	defer func() { keyringTimeout = old }()
+	start := time.Now()
+	k := Keyring{Ref: "r"}
+	_, err = k.Password(context.Background())
+	if e := output.AsError(err); e.Code != "keyring_timeout" || time.Since(start) > 3*time.Second {
+		t.Fatalf("%+v after %s", e, time.Since(start))
+	}
+	if e := output.AsError(k.Available(context.Background())); e.Code != "keyring_timeout" {
+		t.Fatalf("available: %+v", e)
 	}
 }
