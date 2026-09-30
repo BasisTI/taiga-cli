@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -121,5 +122,46 @@ func TestPrepareVersionedDoesNotWrite(t *testing.T) {
 	body, _, err := c.PrepareVersioned(context.Background(), "userstories/1", map[string]any{"comment": "x"})
 	if err != nil || body["version"] != json.Number("9") || f.patches != 0 {
 		t.Fatalf("body=%v err=%v patches=%d", body, err, f.patches)
+	}
+}
+
+func TestWriteVersionedSecondConflictIsConflictError(t *testing.T) {
+	var patches int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			_, _ = w.Write([]byte(`{"version":3,"status":1}`))
+			return
+		}
+		atomic.AddInt32(&patches, 1)
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"version":"The version doesn't match with the current one"}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, StaticToken{}, WithRetryWait(0))
+	_, err := c.WriteVersioned(context.Background(), "PATCH", "userstories/1", map[string]any{"status": 2}, false)
+	var ce *ConflictError
+	if !errors.As(err, &ce) || ToOutput(err).Exit != 4 || atomic.LoadInt32(&patches) != 2 {
+		t.Fatalf("patches=%d err=%v", patches, err)
+	}
+}
+
+func TestWriteVersionedNonConflictErrorIsReturnedWithoutReread(t *testing.T) {
+	var gets, patches int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			atomic.AddInt32(&gets, 1)
+			_, _ = w.Write([]byte(`{"version":3}`))
+			return
+		}
+		atomic.AddInt32(&patches, 1)
+		w.WriteHeader(403)
+		_, _ = w.Write([]byte(`{"_error_message":"no"}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, StaticToken{}, WithRetryWait(0))
+	_, err := c.WriteVersioned(context.Background(), "PATCH", "userstories/1", map[string]any{"status": 2}, false)
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 403 || atomic.LoadInt32(&gets) != 1 || atomic.LoadInt32(&patches) != 1 {
+		t.Fatalf("gets=%d patches=%d err=%v", gets, patches, err)
 	}
 }

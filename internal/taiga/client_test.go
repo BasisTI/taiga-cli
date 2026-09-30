@@ -3,9 +3,11 @@ package taiga
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -80,6 +82,85 @@ func TestToOutputMapping(t *testing.T) {
 		e := ToOutput(&APIError{Status: c.status, Method: "PATCH", Path: "userstories/1", Body: []byte(c.body)})
 		if e.Code != c.code || e.Exit != c.exit || e.Stage != "PATCH userstories/1" || e.Cause != c.body {
 			t.Fatalf("%d: %+v", c.status, e)
+		}
+	}
+}
+
+func TestDoDoesNotFollowRedirectOnPATCH(t *testing.T) {
+	var calls, gets int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		if r.Method == "GET" {
+			atomic.AddInt32(&gets, 1)
+		}
+		http.Redirect(w, r, "/api/v1/elsewhere", http.StatusFound)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, StaticToken{Type: "Bearer", Value: "t"}, WithRetryWait(0))
+	_, err := c.Do(context.Background(), Request{Method: "PATCH", Path: "userstories/1", Body: map[string]any{"a": 1}})
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 302 {
+		t.Fatalf("want APIError 302, got %v", err)
+	}
+	if atomic.LoadInt32(&calls) != 1 || atomic.LoadInt32(&gets) != 0 {
+		t.Fatalf("calls=%d gets=%d", calls, gets)
+	}
+	e := ToOutput(err)
+	if e.Code != "unexpected_redirect" || e.Exit != output.ExitNetwork || !strings.Contains(e.Recovery, "canonical https://") {
+		t.Fatalf("%+v", e)
+	}
+}
+
+func TestDoDoesNotFollowRedirectOnGETWithInjectedClient(t *testing.T) {
+	var targetCalls int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&targetCalls, 1)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer target.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusMovedPermanently)
+	}))
+	defer srv.Close()
+	injected := &http.Client{}
+	for _, c := range []*Client{
+		New(srv.URL, StaticToken{}, WithRetryWait(0)),
+		New(srv.URL, StaticToken{}, WithRetryWait(0), WithHTTPClient(injected)),
+	} {
+		_, err := c.Do(context.Background(), Request{Method: "GET", Path: "projects"})
+		var ae *APIError
+		if !errors.As(err, &ae) || ae.Status != 301 {
+			t.Fatalf("want APIError 301, got %v", err)
+		}
+	}
+	if n := atomic.LoadInt32(&targetCalls); n != 0 {
+		t.Fatalf("redirect target contacted %d times", n)
+	}
+	if injected.CheckRedirect != nil {
+		t.Fatal("the caller's http.Client must not be mutated")
+	}
+}
+
+func TestDoGETStopsAfterThreeAttemptsOn5xx(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(503)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, StaticToken{}, WithRetryWait(0))
+	_, err := c.Do(context.Background(), Request{Method: "GET", Path: "projects"})
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 503 || atomic.LoadInt32(&calls) != 3 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+}
+
+func TestToOutputVersionConflictRecovery(t *testing.T) {
+	for _, body := range []string{`{"version":"The version parameter is not valid"}`, `{"version":"The version doesn't match with the current one"}`} {
+		e := ToOutput(&APIError{Status: 400, Method: "PATCH", Path: "userstories/1", Body: []byte(body)})
+		if e.Code != "version_conflict" || e.Recovery != "re-read the resource and retry; with `taiga api`, include \"version\" or use --auto-version" {
+			t.Fatalf("%+v", e)
 		}
 	}
 }

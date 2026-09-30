@@ -92,7 +92,9 @@ func ToOutput(err error) *output.Error {
 	case ae.Status == 404:
 		e.Code, e.Exit = "not_found", output.ExitNotFound
 	case ae.IsVersionConflict():
-		e.Code, e.Exit, e.Recovery = "version_conflict", output.ExitConflict, "re-read the resource and retry"
+		e.Code, e.Exit, e.Recovery = "version_conflict", output.ExitConflict, "re-read the resource and retry; with `taiga api`, include \"version\" or use --auto-version"
+	case ae.Status >= 300 && ae.Status < 400:
+		e.Code, e.Exit, e.Recovery = "unexpected_redirect", output.ExitNetwork, "check the Taiga URL (use the canonical https:// address)"
 	case ae.Status >= 500:
 		e.Code, e.Exit = "server_error", output.ExitNetwork
 	default:

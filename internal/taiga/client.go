@@ -41,6 +41,11 @@ func New(baseURL string, ts TokenSource, opts ...Option) *Client {
 	for _, o := range opts {
 		o(c)
 	}
+	// Never follow redirects: they would drop the body or leak the token to another host.
+	// Copy the client so an injected one is not mutated.
+	h := *c.http
+	h.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	c.http = &h
 	return c
 }
 
