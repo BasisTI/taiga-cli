@@ -53,3 +53,12 @@ func TestAPIPaginateEmptyListPrintsEmptyArray(t *testing.T) {
 		t.Fatalf("code=%d out=%q err=%s", code, out, errOut)
 	}
 }
+
+func TestAPIPaginateRejectsPageQuery(t *testing.T) {
+	srv, calls := fakeTaiga(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`[]`)) })
+	env := map[string]string{"TAIGA_URL": srv.URL, "TAIGA_TOKEN": "tok"}
+	_, errOut, code := runIn(t, env, "", "api", "GET", "userstories", "--paginate", "--query", "page=3")
+	if code != 2 || len(*calls) != 0 || !strings.Contains(errOut, "page") {
+		t.Fatalf("code=%d calls=%d err=%s", code, len(*calls), errOut)
+	}
+}

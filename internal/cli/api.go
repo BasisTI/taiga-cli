@@ -38,6 +38,9 @@ func (a *App) apiCmd() *cobra.Command {
 			if forceVersion && !autoVersion {
 				return usage("usage", "--force-version requires --auto-version")
 			}
+			if paginate && hasQueryKey(queries, "page") {
+				return usage("usage", "--query page cannot be combined with --paginate (it fetches every page)")
+			}
 			if autoVersion && len(queries) > 0 {
 				return usage("usage", "--query cannot be combined with --auto-version")
 			}
@@ -180,4 +183,14 @@ func (a *App) buildBody(input string, fields, rawFields []string) (map[string]an
 		}
 	}
 	return body, nil
+}
+
+// hasQueryKey reports whether any --query key=value names key.
+func hasQueryKey(queries []string, key string) bool {
+	for _, kv := range queries {
+		if k, _, _ := strings.Cut(kv, "="); k == key {
+			return true
+		}
+	}
+	return false
 }
