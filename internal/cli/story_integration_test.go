@@ -3,8 +3,14 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -222,5 +228,63 @@ func TestIntegrationStoryAssigneesAndBlock(t *testing.T) {
 	s = storyJSON(t, env, "", "story", "update", fmt.Sprint(raw["ref"]), "--owner-assignee", testtaiga.ServiceUser)
 	if users(s) != both || fmt.Sprint(s["assigned_to"]) != svc {
 		t.Fatalf("owner change dropped the previous owner: %v %v", s["assigned_users"], s["assigned_to"])
+	}
+}
+
+// raceUpdate runs `story update` through a proxy that lets concurrent (a `taiga api PATCH` body,
+// with the version read before) land between the CLI's read and its first PATCH. It returns
+// the exit code and how many PATCHes the CLI sent.
+func raceUpdate(t *testing.T, env map[string]string, story map[string]any, concurrent []string, args ...string) (int, int) {
+	t.Helper()
+	target, err := url.Parse(env["TAIGA_URL"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	patches := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PATCH" {
+			patches++
+			body, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			if patches == 1 {
+				storyJSON(t, env, "", append([]string{"api", "PATCH", fmt.Sprintf("userstories/%v", story["id"]), "-F", fmt.Sprintf("version=%v", story["version"])}, concurrent...)...)
+			}
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	race := map[string]string{}
+	for k, v := range env {
+		race[k] = v
+	}
+	race["TAIGA_URL"] = srv.URL
+	_, errOut, code := runIn(t, race, "", append([]string{"story", "update", fmt.Sprint(story["ref"])}, args...)...)
+	if code == 4 && !strings.Contains(errOut, "version_conflict") {
+		t.Errorf("exit 4 without version_conflict: %s", errOut)
+	}
+	return code, patches
+}
+
+// Taiga accepts a stale version when the PATCH sends none of the fields changed since; the CLI
+// sends the whole block pair so that a concurrent block change is a conflict, not a silent loss.
+func TestIntegrationStoryBlockRaces(t *testing.T) {
+	env, _, _ := assignProject(t)
+	pid := storyJSON(t, env, "", "api", "GET", "projects/by_slug", "--query", "slug="+env["TAIGA_PROJECT"])["id"]
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		concurrent []string
+		blocked    bool
+		note       string
+	}{
+		{"unblock keeps a concurrent note", []string{"--unblock"}, []string{"-f", "blocked_note=nota concorrente"}, true, "nota concorrente"},
+	} {
+		s := storyJSON(t, env, "", "api", "POST", "userstories", "-F", fmt.Sprintf("project=%v", pid), "-f", "subject=block race", "-F", "is_blocked=true")
+		code, patches := raceUpdate(t, env, s, tc.concurrent, tc.args...)
+		got := storyJSON(t, env, "", "story", "get", fmt.Sprint(s["ref"]))
+		if code != 4 || patches != 1 || got["is_blocked"] != tc.blocked || got["blocked_note"] != tc.note {
+			t.Errorf("%s: exit %d, %d PATCH, is_blocked=%v note=%q", tc.name, code, patches, got["is_blocked"], got["blocked_note"])
+		}
 	}
 }

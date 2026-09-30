@@ -116,6 +116,12 @@ func TestAssignmentPatchBlockUnblockAndInvalidCombinations(t *testing.T) {
 	if err != nil || got["is_blocked"] != false || got["blocked_note"] != "" {
 		t.Fatalf("%v %v", got, err)
 	}
+	// Taiga's OCC protects only the fields sent: unblocking a story blocked without a note must
+	// still send the note, or a concurrent note would be erased without a conflict.
+	got, err = AssignmentPatch(Object{"is_blocked": true, "blocked_note": ""}, Patch{Unblock: true})
+	if err != nil || len(got) != 2 || got["is_blocked"] != false || got["blocked_note"] != "" {
+		t.Fatalf("unblock pair: %v %v", got, err)
+	}
 	if got, err := AssignmentPatch(Object{"is_blocked": false, "blocked_note": ""}, Patch{Unblock: true}); err != nil || len(got) != 0 {
 		t.Fatalf("unblock no-op: %v %v", got, err)
 	}
