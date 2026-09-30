@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -43,7 +44,10 @@ func netErr(stage string, err error) error {
 	return &output.Error{Code: "network_error", Source: "network", Stage: stage, Cause: err.Error(), Recovery: "check connectivity to the Taiga URL (sandboxed agents need network access)", Exit: output.ExitNetwork}
 }
 
-// Login exchanges username/password for tokens. The password never appears in errors.
+// Auth responses are never copied into errors: a server that echoes the request
+// would otherwise put the password or the refresh token in the envelope.
+
+// Login exchanges username/password for tokens.
 func Login(ctx context.Context, hc *http.Client, baseURL, username string, password []byte) (LoginResult, error) {
 	var res LoginResult
 	status, body, err := post(ctx, hc, baseURL+"/api/v1/auth", map[string]string{"type": "normal", "username": username, "password": string(password)})
@@ -51,10 +55,10 @@ func Login(ctx context.Context, hc *http.Client, baseURL, username string, passw
 		return res, netErr("login", err)
 	}
 	if status == 400 || status == 401 {
-		return res, &output.Error{Code: "auth_invalid_credentials", Source: "api", Stage: "login", Cause: string(body), Recovery: "check the username and the secret source", Exit: output.ExitAuth}
+		return res, &output.Error{Code: "auth_invalid_credentials", Source: "api", Stage: "login", Cause: fmt.Sprintf("the server rejected the login (HTTP %d)", status), Recovery: "check the username and the secret source", Exit: output.ExitAuth}
 	}
 	if status != 200 {
-		return res, &output.Error{Code: "server_error", Source: "api", Stage: "login", Cause: string(body), Exit: output.ExitNetwork}
+		return res, &output.Error{Code: "server_error", Source: "api", Stage: "login", Cause: fmt.Sprintf("unexpected HTTP %d from the login endpoint", status), Exit: output.ExitNetwork}
 	}
 	if err := json.Unmarshal(body, &res); err != nil || res.AuthToken == "" {
 		return res, &output.Error{Code: "server_error", Source: "api", Stage: "login", Cause: "unexpected login response", Exit: output.ExitNetwork}
@@ -69,14 +73,17 @@ func RefreshToken(ctx context.Context, hc *http.Client, baseURL, refresh string)
 		return "", "", netErr("refresh", err)
 	}
 	if status == 400 || status == 401 {
-		return "", "", &output.Error{Code: "session_expired", Source: "session_cache", Stage: "refresh", Cause: string(body), Recovery: "run `taiga auth login` (or `taiga auth refresh` outside the sandbox)", Exit: output.ExitAuth}
+		return "", "", &output.Error{Code: "session_expired", Source: "session_cache", Stage: "refresh", Cause: fmt.Sprintf("the server rejected the refresh token (HTTP %d)", status), Recovery: "run `taiga auth login` (or `taiga auth refresh` outside the sandbox)", Exit: output.ExitAuth}
 	}
 	var out struct {
 		AuthToken string `json:"auth_token"`
 		Refresh   string `json:"refresh"`
 	}
-	if status != 200 || json.Unmarshal(body, &out) != nil || out.AuthToken == "" {
-		return "", "", &output.Error{Code: "server_error", Source: "api", Stage: "refresh", Cause: string(body), Exit: output.ExitNetwork}
+	if status != 200 {
+		return "", "", &output.Error{Code: "server_error", Source: "api", Stage: "refresh", Cause: fmt.Sprintf("unexpected HTTP %d from the refresh endpoint", status), Exit: output.ExitNetwork}
+	}
+	if json.Unmarshal(body, &out) != nil || out.AuthToken == "" {
+		return "", "", &output.Error{Code: "server_error", Source: "api", Stage: "refresh", Cause: "unexpected refresh response", Exit: output.ExitNetwork}
 	}
 	if out.Refresh == "" {
 		out.Refresh = refresh
