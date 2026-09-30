@@ -3,6 +3,7 @@
 package taiga
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -153,4 +154,31 @@ func TestProbeStoryBlock(t *testing.T) {
 		t.Fatalf("block without note: %s %s", r["is_blocked"], r["blocked_note"])
 	}
 	t.Log("FINDING blocked_note is kept only while is_blocked; is_blocked=false clears it; a block without note is accepted")
+}
+
+// Taiga's OCC is per field (taiga/projects/occ/mixins.py): a stale version is refused only when
+// the PATCH sends a field that history recorded as changed since that version.
+func TestProbeOCCIsPerField(t *testing.T) {
+	c := probeClient(t)
+	p := ensureProject(t, c, probeProjectAssign)
+	s := createStory(t, c, p, "occ probe", map[string]any{"is_blocked": true})
+	path := fmt.Sprintf("userstories/%d", s.int("id"))
+	stale := s.int("version")
+	probeDo(t, c, "PATCH", path, nil, map[string]any{"version": stale, "blocked_note": "theirs"})
+
+	r := probeDo(t, c, "PATCH", path, nil, map[string]any{"version": stale, "subject": "mine"})
+	if r.int("version") != stale+2 {
+		t.Fatalf("disjoint field with stale version: v%d", r.int("version"))
+	}
+	t.Log("FINDING a stale version is accepted when the PATCH sends only fields nobody changed since")
+	_, err := c.Do(context.Background(), Request{Method: "PATCH", Path: path, Body: map[string]any{"version": stale, "is_blocked": false}})
+	if err != nil {
+		t.Fatalf("is_blocked alone after a note change: %v", err)
+	}
+	t.Log("FINDING is_blocked:false with a stale version is accepted after a concurrent blocked_note change (and clears it)")
+	_, err = c.Do(context.Background(), Request{Method: "PATCH", Path: path, Body: map[string]any{"version": stale, "is_blocked": true, "blocked_note": "mine"}})
+	if probeStatus(err) != 400 {
+		t.Fatalf("overlapping field with stale version: %v", err)
+	}
+	t.Log("FINDING sending blocked_note with a stale version after a blocked_note change is a version conflict")
 }

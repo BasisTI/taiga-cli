@@ -8,7 +8,7 @@ Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 202
 | Vida do `refresh` | ≈ 8 dias (192 h, claim `exp` do JWT) | `TestProbeTokenLifetimes` |
 | Refresh rotaciona | sim: `POST /auth/refresh` devolve um `refresh` novo | `TestProbeRefreshRotationInvalidatesPrevious` |
 | Refresh anterior invalidado | sim: reusar o `refresh` antigo é recusado. Por isso `refreshInvalidatesPrevious = true` e, com o cache somente leitura, a CLI não renova e devolve `session_expired` | `TestProbeRefreshRotationInvalidatesPrevious` |
-| `PATCH` com `version` desatualizado | `400 {"version": "The version doesn't match with the current one"}` | sondagem manual da US #245; `TestIntegrationAutoVersionOnStory` |
+| `PATCH` com `version` desatualizado | `400 {"version": "The version doesn't match with the current one"}` **só quando o PATCH envia um campo alterado desde aquela versão**; sem sobreposição, é aceito (ver "OCC por campo") | sondagem manual da US #245; `TestIntegrationAutoVersionOnStory`; `TestProbeOCCIsPerField` |
 | `PATCH` sem `version` | `400 {"version": "The version parameter is not valid"}`, também tratado como conflito | sondagem manual da US #245 |
 | `x-disable-pagination` respeitado | sim (lista sem `x-pagination-next`) | `TestIntegrationAPIProjectsAndUsersMe` |
 | Paginação | `?page=N`; o próximo vem em `X-Pagination-Next` | sondagem manual da US #245 |
@@ -114,3 +114,49 @@ Consequências na CLI:
 | `blocked_note` com a story bloqueada | gravado |
 | `is_blocked: false` sozinho | limpa também `blocked_note` |
 | `is_blocked: true` sem nota | aceito pelo servidor; a CLI exige nota em `--block` |
+
+### OCC por campo
+
+Observado em `TestProbeOCCIsPerField` (mesmo projeto descartável) e lido em `taiga/projects/occ/mixins.py` do
+`taiga-back` 6.7.3:
+
+```python
+            if current_version != param_version:
+                diff_versions = current_version - param_version
+
+                modifying_fields = set(self.request.DATA.keys())
+                if "version" in modifying_fields:
+                    modifying_fields.remove("version")
+
+                modified_fields = set(get_modified_fields(obj, diff_versions))
+                if "version" in modifying_fields:
+                    modified_fields.remove("version")
+
+                both_modified = modifying_fields & modified_fields
+
+                if both_modified:
+                    raise exc.WrongArguments({"version": _("The version doesn't match with the current one")})
+```
+
+`get_modified_fields` junta as chaves do `diff` das últimas `diff_versions` entradas do histórico. O conflito só
+existe quando as chaves enviadas cruzam as chaves alteradas desde a versão enviada; com `version` antiga e
+campos disjuntos, o PATCH é aceito e a `version` sobe. O histórico grava a lista **armazenada** de
+`assigned_users` (`userstory_freezer`), não a da resposta.
+
+| Requisição (com `version` antiga, depois de outra pessoa gravar `blocked_note`) | Resultado |
+|---|---|
+| `{"subject"}` | 200 |
+| `{"is_blocked": false}` | 200, e apaga a nota da outra pessoa |
+| `{"is_blocked", "blocked_note"}` | 400 conflito de versão |
+
+Regra da CLI: **todo PATCH envia cada campo de que o cálculo dependeu**, porque só esses são protegidos:
+
+- bloqueio: `--block` e `--unblock` enviam sempre o par `is_blocked` + `blocked_note`;
+- responsáveis: sempre que `assigned_users` vai no PATCH, `assigned_to` vai junto (a lista lida inclui o
+  principal, e a recusa de remover o principal depende dele);
+- tags, `--append-description`, status, milestone e swimlane já enviam o próprio campo de que dependem.
+
+Na escrita versionada da #246 (`WriteVersionedFrom`), a repetição única após conflito compara só as chaves do
+patch entre a leitura inicial e a releitura. Com a regra acima, isso cobre as dependências; o que a premissa
+"version antiga sempre conflita" escondia era só o caso de campos derivados não enviados, agora fechado. Um
+PATCH com responsáveis continua sem repetição (a lista armazenada não aparece na releitura).
