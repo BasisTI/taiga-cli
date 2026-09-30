@@ -36,7 +36,7 @@ func TestCommandSecretSuccessAndErrors(t *testing.T) {
 	}
 	_, err = CommandSecret{Args: []string{"/bin/sh", "-c", "echo 'gpg: decryption failed: Inappropriate ioctl for device' >&2; exit 2"}}.Password(ctx)
 	e := output.AsError(err)
-	if e.Code != "secret_command_failed" || !strings.Contains(e.Cause, "exit status 2") || !strings.Contains(e.Cause, "Inappropriate ioctl") || !strings.Contains(e.Recovery, "GPG_TTY") {
+	if e.Code != "secret_command_failed" || !strings.Contains(e.Cause, "exit status 2") || !strings.Contains(e.Cause, "inappropriate ioctl") || !strings.Contains(e.Recovery, "GPG_TTY") {
 		t.Fatalf("%+v", e)
 	}
 	_, err = CommandSecret{Args: []string{"/nonexistent/helper"}}.Password(ctx)
@@ -102,5 +102,29 @@ func TestCommandSecretTimeoutKeepsPinentryHint(t *testing.T) {
 	e := output.AsError(err)
 	if e.Code != "secret_command_timeout" || e.Exit != 3 || !strings.Contains(e.Cause, "pinentry") || !strings.Contains(e.Recovery, "GPG_TTY") {
 		t.Fatalf("%+v", e)
+	}
+}
+
+// Codex review #3: neither stderr nor argv of the secret command may reach the envelope;
+// known gpg/pinentry patterns are still classified so the GPG_TTY hint survives.
+func TestCommandSecretErrorsNeverEchoStderrOrArgs(t *testing.T) {
+	old := commandTimeout
+	commandTimeout = 200 * time.Millisecond
+	defer func() { commandTimeout = old }()
+	const marker = "FAKE_SECRET_MARKER"
+	cases := map[string]string{
+		"failed":  "printf " + marker + "; printf 'gpg: " + marker + "' >&2; exit 2",
+		"timeout": "printf 'pinentry " + marker + "' >&2; sleep 5",
+		"plain":   "printf '" + marker + "' >&2; exit 1",
+	}
+	for name, script := range cases {
+		_, err := CommandSecret{Args: []string{"/bin/sh", "-c", script, "--passphrase=" + marker}}.Password(context.Background())
+		e := output.AsError(err)
+		if strings.Contains(e.Cause+e.Recovery+e.Stage, marker) {
+			t.Fatalf("%s: %+v", name, e)
+		}
+		if name != "plain" && !strings.Contains(e.Recovery, "GPG_TTY") {
+			t.Fatalf("%s lost the GPG_TTY hint: %+v", name, e)
+		}
 	}
 }

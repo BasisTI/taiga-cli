@@ -36,9 +36,9 @@ Todo erro sai no stderr como `{"error":{"code","source","stage","cause","recover
 | `session_cache_write_failed` | — | — | aviso: a sessão nova não pôde ser gravada por outro motivo | conferir o state dir |
 | `password_file_unreadable` | 3 | `env` | `TAIGA_PASSWORD_FILE` não pôde ser lido | conferir caminho e permissões |
 | `password_file_empty` | 3 | `env` | `TAIGA_PASSWORD_FILE` vazio | preencher o arquivo |
-| `secret_command_timeout` | 3 | `secret_command` | o comando não respondeu em 10 s (por exemplo gpg esperando o pinentry) | se o stderr citar gpg/pinentry: `export GPG_TTY=$(tty); <comando> >/dev/null` num terminal fora do sandbox |
+| `secret_command_timeout` | 3 | `secret_command` | o comando não respondeu em 10 s (por exemplo gpg esperando o pinentry) | se o stderr citar gpg/pinentry: rodar o comando uma vez com `export GPG_TTY=$(tty)` num terminal fora do sandbox |
 | `secret_command_not_found` | 3 | `secret_command` | executável inexistente ou `secret_command` vazio | corrigir o caminho (sem shell) |
-| `secret_command_failed` | 3 | `secret_command` | exit diferente de 0; `cause` = `exit status N: <stderr sanitizado>` | rodar o comando à mão; dica de `GPG_TTY` se for gpg |
+| `secret_command_failed` | 3 | `secret_command` | exit diferente de 0; `cause` = `exit status N;` seguido só dos padrões conhecidos do stderr (gpg, pinentry, `inappropriate ioctl`, `no tty`). O texto do stderr e o argv nunca são copiados, porque podem conter o segredo | rodar o comando à mão; dica de `GPG_TTY` se for gpg |
 | `secret_command_empty` | 3 | `secret_command` | o comando não imprimiu nada | conferir o comando |
 | `file_secret_missing` | 3 | `file` | arquivo do `--insecure-storage` ausente ou ilegível | `taiga auth login --insecure-storage` de novo |
 | `file_secret_insecure_permissions` | 3 | `file` | arquivo do segredo legível por grupo ou outros | `chmod 600` |

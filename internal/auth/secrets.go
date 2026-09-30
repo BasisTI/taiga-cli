@@ -72,25 +72,34 @@ func (c *capped) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-var ctrl = regexp.MustCompile(`[\x00-\x09\x0b-\x1f\x7f]`)
-var gpgHint = regexp.MustCompile(`(?i)pinentry|inappropriate ioctl|no tty|gpg:`)
+// stderrPatterns are the only stderr facts that reach the user. The command's stderr and
+// argv are never copied: a helper may print the secret there or take it as an argument.
+var stderrPatterns = []struct {
+	re    *regexp.Regexp
+	label string
+}{
+	{regexp.MustCompile(`(?i)gpg:`), "gpg"},
+	{regexp.MustCompile(`(?i)pinentry`), "pinentry"},
+	{regexp.MustCompile(`(?i)inappropriate ioctl`), "inappropriate ioctl for device"},
+	{regexp.MustCompile(`(?i)no tty`), "no tty"},
+}
 
-func sanitizeStderr(b []byte) string {
-	lines := strings.Split(ctrl.ReplaceAllString(string(b), ""), "\n")
-	var kept []string
-	for _, l := range lines {
-		if strings.TrimSpace(l) != "" {
-			kept = append(kept, strings.TrimSpace(l))
+// classifyStderr names the known patterns in stderr, and whether any gpg/pinentry one matched.
+func classifyStderr(b []byte) (string, bool) {
+	var labels []string
+	for _, p := range stderrPatterns {
+		if p.re.Match(b) {
+			labels = append(labels, p.label)
 		}
 	}
-	if len(kept) > 3 {
-		kept = kept[len(kept)-3:]
+	switch {
+	case len(labels) > 0:
+		return "stderr mentions " + strings.Join(labels, ", ") + " (other stderr text withheld)", true
+	case len(bytes.TrimSpace(b)) > 0:
+		return "stderr withheld (it may contain the secret)", false
+	default:
+		return "no stderr output", false
 	}
-	s := strings.Join(kept, " | ")
-	if len(s) > 300 {
-		s = s[:300] + "…"
-	}
-	return s
 }
 
 func (c CommandSecret) Password(ctx context.Context) ([]byte, error) {
@@ -105,23 +114,23 @@ func (c CommandSecret) Password(ctx context.Context) ([]byte, error) {
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.WaitDelay = time.Second
 	err := cmd.Run()
-	cmdline := strings.Join(c.Args, " ")
+	detail, gpg := classifyStderr(stderr.Bytes())
 	recovery := "run the secret command by hand to see what it needs"
-	if gpgHint.Match(stderr.Bytes()) {
-		recovery = fmt.Sprintf("run `export GPG_TTY=$(tty); %s >/dev/null` in an interactive terminal outside the sandbox to unlock gpg-agent, then retry", cmdline)
+	if gpg {
+		recovery = "run the secret command once with `export GPG_TTY=$(tty)` in an interactive terminal outside the sandbox to unlock gpg-agent, then retry"
 	}
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return nil, authErr("secret_command_timeout", "secret_command", fmt.Sprintf("no answer after %s: %s", commandTimeout, sanitizeStderr(stderr.Bytes())), recovery)
+		return nil, authErr("secret_command_timeout", "secret_command", fmt.Sprintf("no answer after %s; %s", commandTimeout, detail), recovery)
 	case errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist):
-		return nil, authErr("secret_command_not_found", "secret_command", err.Error(), "fix secret_command in the config (absolute path, no shell)")
+		return nil, authErr("secret_command_not_found", "secret_command", "executable not found: "+c.Args[0], "fix secret_command in the config (absolute path, no shell)")
 	case err != nil:
 		var ee *exec.ExitError
 		code := -1
 		if errors.As(err, &ee) {
 			code = ee.ExitCode()
 		}
-		return nil, authErr("secret_command_failed", "secret_command", fmt.Sprintf("exit status %d: %s", code, sanitizeStderr(stderr.Bytes())), recovery)
+		return nil, authErr("secret_command_failed", "secret_command", fmt.Sprintf("exit status %d; %s", code, detail), recovery)
 	}
 	out := bytes.TrimSuffix(bytes.TrimSuffix(stdout.Bytes(), []byte("\n")), []byte("\r"))
 	if len(out) == 0 {
