@@ -46,11 +46,24 @@ func (c *Client) PrepareVersioned(ctx context.Context, path string, patch map[st
 
 // WriteVersioned applies patch with optimistic concurrency and one guarded retry.
 func (c *Client) WriteVersioned(ctx context.Context, method, path string, patch map[string]any, force bool) (*Response, error) {
-	body, first, err := c.PrepareVersioned(ctx, stagePath(path), patch)
+	_, first, err := c.PrepareVersioned(ctx, stagePath(path), patch)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.Do(ctx, Request{Method: method, Path: path, Body: body})
+	return c.WriteVersionedFrom(ctx, method, path, patch, first, force)
+}
+
+// WriteVersionedFrom writes patch with the version of first, the snapshot the caller used to
+// compute it. On a version conflict it re-reads once and retries only when none of the patched
+// fields changed since first (or force is set), so a merge is never applied over newer data.
+func (c *Client) WriteVersionedFrom(ctx context.Context, method, path string, patch map[string]any,
+	first map[string]json.RawMessage, force bool) (*Response, error) {
+	version, ok := first["version"]
+	var n int64
+	if !ok || bytes.Equal(bytes.TrimSpace(version), []byte("null")) || json.Unmarshal(version, &n) != nil || n < 0 {
+		return nil, fmt.Errorf("GET %s: resource has no valid version", stagePath(path))
+	}
+	resp, err := c.Do(ctx, Request{Method: method, Path: path, Body: withVersion(patch, version)})
 	var ae *APIError
 	if err == nil || !errors.As(err, &ae) || !ae.IsVersionConflict() {
 		return resp, err
