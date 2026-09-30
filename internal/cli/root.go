@@ -71,6 +71,7 @@ func (a *App) root() *cobra.Command {
 		},
 	})
 	root.AddCommand(a.apiCmd())
+	root.AddCommand(a.authCmd())
 	return root
 }
 
