@@ -79,7 +79,7 @@ func changedKeys(patch map[string]any, a, b map[string]json.RawMessage) []string
 		}
 		va, inA := a[k]
 		vb, inB := b[k]
-		if inA != inB || !jsonEqual(va, vb) {
+		if inA != inB || (inA && !jsonEqual(va, vb)) {
 			out = append(out, k)
 		}
 	}
