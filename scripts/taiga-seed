@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Seeds the local test Taiga: admin + service account + one project. Test-only credentials.
+set -euo pipefail
+URL="${TAIGA_TEST_URL:-http://localhost:8000}"
+
+# Safety: only ever seed a Taiga on loopback (tests must not write to a real Taiga).
+host="${URL#*://}"; host="${host%%/*}"; host="${host##*@}"
+if [[ "$host" == \[* ]]; then host="${host%%]*}]"; else host="${host%%:*}"; fi
+host="${host,,}"
+octet='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+if ! [[ "$host" == localhost || "$host" == '[::1]' || "$host" =~ ^127\.$octet\.$octet\.$octet$ ]]; then
+  echo "error: refusing to seed TAIGA_TEST_URL host '$host': only loopback (localhost, 127.0.0.0/8, ::1) is allowed" >&2
+  exit 1
+fi
+if [[ "${1:-}" == --check-url ]]; then exit 0; fi
+
+COMPOSE=(docker compose -f "$(dirname "$0")/../compose.test.yml")
+
+echo "waiting for $URL/api/v1/ ..."
+for _ in $(seq 1 90); do
+  if curl -fsS "$URL/api/v1/" >/dev/null 2>&1; then break; fi
+  sleep 2
+done
+curl -fsS "$URL/api/v1/" >/dev/null
+
+"${COMPOSE[@]}" exec -T taiga-back python manage.py shell -c '
+from django.contrib.auth import get_user_model
+U = get_user_model()
+if not U.objects.filter(username="admin").exists():
+    U.objects.create_superuser("admin", "admin@example.com", "admin123")
+if not U.objects.filter(username="svc").exists():
+    U.objects.create_user("svc", "svc@example.com", "svc12345", full_name="Service Account")
+'
+
+TOKEN=$(curl -fsS -X POST "$URL/api/v1/auth" -H 'Content-Type: application/json' \
+  -d '{"type":"normal","username":"admin","password":"admin123"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["auth_token"])')
+code=$(curl -sS -o /dev/null -w '%{http_code}' "$URL/api/v1/projects/by_slug?slug=cli-test" -H "Authorization: Bearer $TOKEN") || {
+  echo "error: project lookup failed" >&2; exit 1; }
+case "$code" in
+  200) ;;
+  404)
+    curl -fsS -X POST "$URL/api/v1/projects" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+      -d '{"name":"cli-test","description":"taiga-cli integration tests","creation_template":1}' >/dev/null ;;
+  *) echo "error: project lookup returned HTTP $code" >&2; exit 1 ;;
+esac
+echo "seeded: admin/admin123, svc/svc12345, project cli-test"

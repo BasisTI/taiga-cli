@@ -1,0 +1,77 @@
+name: taiga-cli-test
+x-back-env: &back-env
+  POSTGRES_DB: taiga
+  POSTGRES_USER: taiga
+  POSTGRES_PASSWORD: taiga-test-only
+  POSTGRES_HOST: taiga-db
+  TAIGA_SECRET_KEY: taiga-cli-test-secret-key-not-for-production
+  TAIGA_SITES_SCHEME: http
+  TAIGA_SITES_DOMAIN: localhost:8000
+  TAIGA_SUBPATH: ""
+  EMAIL_BACKEND: django.core.mail.backends.console.EmailBackend
+  DEFAULT_FROM_EMAIL: taiga@localhost
+  RABBITMQ_USER: taiga
+  RABBITMQ_PASS: taiga-test-only
+  ENABLE_TELEMETRY: "False"
+  PUBLIC_REGISTER_ENABLED: "True"
+x-rabbit-env: &rabbit-env
+  RABBITMQ_ERLANG_COOKIE: taiga-cli-test-cookie
+  RABBITMQ_DEFAULT_USER: taiga
+  RABBITMQ_DEFAULT_PASS: taiga-test-only
+  RABBITMQ_DEFAULT_VHOST: taiga
+services:
+  taiga-db:
+    image: postgres:12.3
+    environment:
+      POSTGRES_DB: taiga
+      POSTGRES_USER: taiga
+      POSTGRES_PASSWORD: taiga-test-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taiga"]
+      interval: 2s
+      timeout: 15s
+      retries: 15
+  taiga-events-rabbitmq:
+    image: rabbitmq:3.8-management-alpine
+    hostname: taiga-events-rabbitmq
+    environment: *rabbit-env
+  taiga-async-rabbitmq:
+    image: rabbitmq:3.8-management-alpine
+    hostname: taiga-async-rabbitmq
+    environment: *rabbit-env
+  taiga-back:
+    image: taigaio/taiga-back:6.7.3
+    environment: *back-env
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      taiga-db:
+        condition: service_healthy
+      taiga-events-rabbitmq:
+        condition: service_started
+      taiga-async-rabbitmq:
+        condition: service_started
+  # Services below are only started with `--profile full` (no gateway is provided).
+  taiga-events:
+    image: taigaio/taiga-events:6.7.0
+    profiles: ["full"]
+    environment:
+      RABBITMQ_USER: taiga
+      RABBITMQ_PASS: taiga-test-only
+      TAIGA_SECRET_KEY: taiga-cli-test-secret-key-not-for-production
+    depends_on:
+      - taiga-events-rabbitmq
+  taiga-protected:
+    image: taigaio/taiga-protected:6.7.0
+    profiles: ["full"]
+    environment:
+      MAX_AGE: 360
+      SECRET_KEY: taiga-cli-test-secret-key-not-for-production
+  taiga-front:
+    image: taigaio/taiga-front:6.7.7
+    profiles: ["full"]
+    environment:
+      TAIGA_URL: http://localhost:8000
+      TAIGA_WEBSOCKETS_URL: ws://localhost:8000
+      TAIGA_SUBPATH: ""
+      PUBLIC_REGISTER_ENABLED: "true"
