@@ -129,6 +129,17 @@ type storyFake struct {
 	onPatchValues func(v map[string]any)
 	// badValuesWrite makes a successful values PATCH answer with a body that is not JSON.
 	badValuesWrite bool
+	// truncate makes a successful write answer cut short after the status line (the connection
+	// drops mid-body), for every write.
+	truncate bool
+}
+
+// cut answers status with a Content-Length it does not honour, so the client sees the status
+// but cannot read the body.
+func cut(w http.ResponseWriter, status int) {
+	w.Header().Set("Content-Length", "1000")
+	w.WriteHeader(status)
+	_, _ = fmt.Fprint(w, `{"id":`)
 }
 
 func newStoryFake(t *testing.T) (*storyFake, *[]recorded) {
@@ -292,6 +303,10 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		s["version"] = s["version"].(int) + 1
+		if f.truncate {
+			cut(w, 200)
+			return
+		}
 		if f.badWrite {
 			_, _ = fmt.Fprint(w, `<html>proxy</html>`)
 			return
@@ -313,6 +328,10 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		f.stories[f.nextID] = s
+		if f.truncate {
+			cut(w, 201)
+			return
+		}
 		w.WriteHeader(201)
 		if f.badWrite {
 			_, _ = fmt.Fprint(w, `<html>proxy</html>`)

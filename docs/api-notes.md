@@ -266,7 +266,9 @@ Consequências na CLI (`story field set`, e o serviço de valores de task):
   calculou o merge e trazer exatamente o dicionário enviado. Se não bate, outra escrita caiu entre a leitura e o
   `PATCH` (e pode ter sido desfeita pelo nosso): sai `field_values_postcondition_failed` (exit 4), com a escrita
   **aplicada** e o estado encontrado; sem repetição. Se a resposta não decodificar, vale a releitura, com a mesma
-  exigência; se nenhuma das duas der, `write_applied`;
+  exigência; se nenhuma das duas der, `write_applied`. Resposta **truncada** depois do 200 (conexão caída no meio
+  do corpo) conta como resposta que não decodifica: o cliente devolve `UnreadableBodyError` em vez de erro de rede,
+  sem repetir, e o fluxo relê e confere (`TestIntegrationTruncatedValuesAnswerIsDetected`, com proxy local);
 - não há releitura extra antes do `PATCH`, como em responsáveis: a leitura dos valores já é a última requisição
   antes da escrita. A janela entre essa leitura e o `PATCH` é detectada, não evitada. `--force-version` pula a
   conferência;

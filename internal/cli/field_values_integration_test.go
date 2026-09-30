@@ -3,9 +3,13 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -147,5 +151,71 @@ func TestIntegrationTaskFieldValues(t *testing.T) {
 	again := storyJSON(t, env, "", "api", "GET", fmt.Sprintf("tasks/%d", id))
 	if again["version"] != task["version"] {
 		t.Fatalf("the task version moved: %v → %v", task["version"], again["version"])
+	}
+}
+
+// The review case: someone writes key B between our read and our PATCH; our PATCH overwrites
+// the dictionary without B (Taiga accepts the old version) and its answer is cut after the
+// 200. The CLI must re-read and report the applied, clashing write (exit 4), not a network
+// error (exit 7) that scripts would repeat.
+func TestIntegrationTruncatedValuesAnswerIsDetected(t *testing.T) {
+	token, _ := testtaiga.Login(t, testtaiga.AdminUser, testtaiga.AdminPassword)
+	base := testtaiga.URL()
+	env := map[string]string{"TAIGA_URL": base, "TAIGA_TOKEN": token, "TAIGA_PROJECT": testtaiga.ProjectSlug}
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	a := storyJSON(t, env, "", "field", "create", "--kind", "story", "--name", "Truncated A "+suffix, "--type", "text")
+	b := storyJSON(t, env, "", "field", "create", "--kind", "story", "--name", "Truncated B "+suffix, "--type", "text")
+	story := storyJSON(t, env, "", "story", "create", "--subject", "truncated "+suffix)
+	path := fmt.Sprintf("/api/v1/userstories/custom-attributes-values/%v", story["id"])
+
+	direct := func(method string, body any) {
+		t.Helper()
+		payload, _ := json.Marshal(body)
+		req, _ := http.NewRequest(method, base+path, bytes.NewReader(payload))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil || resp.StatusCode != 200 {
+			t.Fatalf("%s %s: %v %v", method, path, err, resp)
+		}
+		_ = resp.Body.Close()
+	}
+	patches := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if r.Method == "PATCH" && r.URL.Path == path {
+			patches++
+			direct("PATCH", map[string]any{"version": 1, "attributes_values": map[string]any{fmt.Sprint(b["id"]): "other person"}})
+		}
+		req, _ := http.NewRequest(r.Method, base+r.URL.RequestURI(), bytes.NewReader(body))
+		req.Header = r.Header.Clone()
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Errorf("forward: %v", err)
+			w.WriteHeader(502)
+			return
+		}
+		answer, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", fmt.Sprint(len(answer)))
+		w.WriteHeader(resp.StatusCode)
+		if r.Method == "PATCH" && r.URL.Path == path {
+			_, _ = w.Write(answer[:10]) // the connection drops mid-body
+			return
+		}
+		_, _ = w.Write(answer)
+	}))
+	defer srv.Close()
+
+	proxied := map[string]string{"TAIGA_URL": srv.URL, "TAIGA_TOKEN": token, "TAIGA_PROJECT": testtaiga.ProjectSlug}
+	_, errOut, code := runIn(t, proxied, "", "story", "field", "set", fmt.Sprint(story["ref"]), fmt.Sprintf("%v=mine", a["name"]))
+	if code != 4 || !strings.Contains(errOut, "field_values_postcondition_failed") || !strings.Contains(errOut, "the change was applied") || patches != 1 {
+		t.Fatalf("exit %d, %d PATCH: %s", code, patches, errOut)
+	}
+	// B was lost, as the error says: the CLI detects it, it cannot prevent it.
+	values := storyJSON(t, env, "", "story", "field", "list", fmt.Sprint(story["ref"]))
+	if got := values["attributes_values"].(map[string]any); got[fmt.Sprint(a["id"])] != "mine" || got[fmt.Sprint(b["id"])] != nil || values["version"] != float64(3) {
+		t.Fatalf("values: %v", values)
 	}
 }

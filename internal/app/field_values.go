@@ -150,7 +150,7 @@ func (s *Service) SetFieldValues(ctx context.Context, kind string, id int64, ent
 // exactly the dictionary sent; otherwise another write landed in between, which is reported
 // as applied and never retried. --force-version skips the check.
 func (s *Service) writeValues(ctx context.Context, path string, before, merged Object, force bool) (Object, error) {
-	resp, err := s.API.Do(ctx, taiga.Request{Method: "PATCH", Path: path, Body: map[string]any{"attributes_values": merged, "version": before["version"]}})
+	resp, err := confirmed(s.API.Do(ctx, taiga.Request{Method: "PATCH", Path: path, Body: map[string]any{"attributes_values": merged, "version": before["version"]}}))
 	if err != nil {
 		var ae *taiga.APIError
 		if errors.As(err, &ae) && ae.IsVersionConflict() {

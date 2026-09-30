@@ -53,6 +53,10 @@ func (f *storyFake) handleFields(w http.ResponseWriter, r *http.Request, path st
 			f.defs = map[string][]map[string]any{}
 		}
 		f.defs[path] = append(f.defs[path], d)
+		if f.truncate {
+			cut(w, 201)
+			return true
+		}
 		w.WriteHeader(201)
 		if f.badWrite {
 			_, _ = fmt.Fprint(w, `<html>proxy</html>`)
@@ -113,6 +117,10 @@ func (f *storyFake) handleValues(w http.ResponseWriter, r *http.Request, path st
 	v["version"] = v["version"].(int) + 1
 	if f.onPatchValues != nil {
 		f.onPatchValues(v)
+	}
+	if f.truncate {
+		cut(w, 200)
+		return
 	}
 	if f.badValuesWrite {
 		_, _ = fmt.Fprint(w, `<html>proxy</html>`)
