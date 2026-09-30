@@ -5,7 +5,14 @@ on:
 permissions:
   contents: write
 jobs:
+  # A release only ships from a commit that passes the same checks as ci.yml
+  # (vet, test -race, lint and the integration job).
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
   goreleaser:
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
