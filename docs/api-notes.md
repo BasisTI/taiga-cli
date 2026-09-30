@@ -15,6 +15,7 @@ Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 202
 | Application tokens para conta de serviço | não validado na fase 1: exige cadastrar uma Application pelo admin do Django; fica para quando houver demanda | — |
 | `userstories/by_ref?ref=&project=` | validado na fase 2; ver seção abaixo | `TestProbeStoryByRef` |
 | Escrita de swimlane, upload de anexo, comentários no histórico | fases 2 e 3 | — |
+| Relação `assigned_to` × `assigned_users`, bloqueio | validado na fase 2; ver "responsáveis e bloqueio" | `TestProbeStoryAssignees`, `TestProbeStoryBlock` |
 
 ## Fase 2 — stories (US #246)
 
@@ -66,3 +67,46 @@ para conferir localmente cada filtro depois do `GetAll`.
 `GET memberships?project=<id>` delimita os membros (`user` = id), mas não traz `username`. A CLI resolve o
 username em `users?project=` e exige que o id esteja em `memberships`. O servidor aceita `assigned_users`
 com usuário de fora do projeto (PATCH 200), então a checagem é da CLI.
+
+## Fase 2 — responsáveis e bloqueio (US #247)
+
+Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 2026-09-30, com a conta `admin` no projeto
+descartável `cli-test-probe-assign`, onde `admin` e `svc` são membros (o `cli-test` mantém `svc` de fora para
+`TestProbeUsersCatalogScope`). Testes em `internal/taiga/assignees_probe_integration_test.go`:
+`go test -tags integration -run '^TestProbeStory(Assignees|Block)$' -v ./internal/taiga`.
+
+### `assigned_to` e `assigned_users`
+
+A resposta **não** mostra a lista gravada: o serializer devolve `assigned_users` = lista gravada ∪ {`assigned_to`}
+(`taiga/projects/userstories/serializers.py`, `get_assigned_users`). A lista gravada fica invisível pela API.
+
+| Requisição | Resultado |
+|---|---|
+| POST com `assigned_to` fora de `assigned_users` | 201; a resposta mostra os dois |
+| POST sem responsáveis | `assigned_users: []`, `assigned_to: null` |
+| PATCH `assigned_users` sem o `assigned_to` atual | 200, `version` sobe, **o responsável principal continua na resposta** (remoção ignorada em silêncio na leitura) |
+| PATCH `assigned_to: null` + `assigned_users` sem ele | os dois saem |
+| PATCH só `assigned_to` (troca ou `null`) | o responsável principal anterior **some** de `assigned_users` quando nunca esteve na lista gravada (entrou só por `assigned_to`); fica quando estava gravado |
+| PATCH `assigned_to` + `assigned_users` com a lista completa | a lista enviada fica, mais o novo principal |
+| usuário de fora do projeto em `assigned_users` | aceito pelo servidor (já registrado na #246); a CLI confere em `memberships` |
+
+Consequências na CLI:
+
+- `--add-assignee`/`--remove-assignee` enviam a lista lida (a da resposta) mais/menos os ids pedidos. Enviar a lista
+  lida grava explicitamente quem estava só implícito.
+- Remover o responsável principal sem trocar `assigned_to` no mesmo comando é recusado (`usage`, exit 2): o PATCH
+  seria aceito e a leitura continuaria mostrando a pessoa. Não há sincronização implícita: a troca é explícita com
+  `--owner-assignee` ou `--clear-owner-assignee`.
+- Toda mudança de `assigned_to` envia também `assigned_users` com a lista completa, para não perder um responsável
+  principal anterior que o Taiga descartaria.
+- A OCC cobre as duas chaves: se outra pessoa mexeu em `assigned_users` entre a leitura e o PATCH, `version_conflict`.
+
+### Bloqueio
+
+| Requisição | Resultado |
+|---|---|
+| `is_blocked: true` + `blocked_note` | gravados; aspas, quebra de linha e acentos preservados |
+| `blocked_note` com a story desbloqueada | **descartado** (continua `""`) |
+| `blocked_note` com a story bloqueada | gravado |
+| `is_blocked: false` sozinho | limpa também `blocked_note` |
+| `is_blocked: true` sem nota | aceito pelo servidor; a CLI exige nota em `--block` |

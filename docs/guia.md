@@ -39,11 +39,15 @@ taiga story get 246
 taiga story create --subject "Nova story" --tag cli --description-file descricao.md
 taiga story update 246 --status "In progress" --add-tag cli --milestone "Sprint 12"
 taiga story update 246 --append-description "Entregue em staging."
+taiga story update 247 --add-assignee me --add-assignee fulano --block "aguardando revisão da B6"
+taiga story update 247 --remove-assignee fulano --unblock
 taiga story close 246 --status Done
 ```
 
 - Toda escrita aceita `--dry-run`, que mostra método, caminho e corpo sem gravar. O `update` envia só os campos que mudam, com o `version` lido; se outra pessoa mudou os mesmos campos no meio, a CLI para com `version_conflict` (exit 4).
 - `--tag` substitui as tags; `--add-tag` e `--remove-tag` unem com as atuais. O Taiga grava tags em minúsculas.
+- Responsáveis: `--add-assignee` e `--remove-assignee` (username exato, id ou `me`, sempre membro do projeto) unem com os responsáveis atuais, sem substituí-los, e não mexem no responsável principal (`assigned_to`). Para trocá-lo, `--owner-assignee`; para limpá-lo, `--clear-owner-assignee`. Como o Taiga sempre mostra o responsável principal entre os responsáveis, removê-lo exige um desses dois flags no mesmo comando; sem isso a CLI recusa (exit 2) em vez de gravar algo que o Taiga ignoraria. No `create`, `--assignee` (repetível) define os responsáveis iniciais.
+- Bloqueio: `--block "nota"` bloqueia com a nota (obrigatória); `--unblock` desbloqueia e limpa a nota.
 - `close` só muda o status para um status fechado: não arquiva nem exclui. No template padrão há dois status fechados (`Done` e `Archived`), então informe `--status`.
 - Vincular story a épico (`--epic`) ainda não é suportado: o Taiga faz o vínculo por um recurso à parte, sem `version`, e trocar o vínculo exige `DELETE`. Use a interface web por enquanto.
 
