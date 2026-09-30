@@ -172,9 +172,23 @@ caso era o bloqueio (`--unblock` mandava só `is_blocked`, `--block` podia manda
 com o envio do par. Um PATCH com responsáveis continua sem repetição (a lista armazenada não aparece na
 releitura).
 
-**Limitação conhecida — `assigned_to`:** como o histórico ignora o campo, com a lista armazenada não vazia nenhum PATCH é protegido contra uma
-troca concorrente do responsável principal, nem mandando `assigned_to` junto (testado: aceito). Efeitos
-possíveis numa corrida estreita: `--remove-assignee X` enquanto outra pessoa torna X principal sai com exit 0 e X
-continua mostrado; `--owner-assignee`/`--clear-owner-assignee` sobrescreve a troca concorrente. A troca da lista
-armazenada é detectada normalmente. Fechar isso exigiria conferir o resultado relido depois da escrita (decisão
-de produto em aberto, não implementada).
+**Limitação do Taiga — `assigned_to`:** com a lista armazenada não vazia, nenhum PATCH é protegido pelo OCC
+contra uma troca concorrente do responsável principal, nem mandando `assigned_to` junto (testado: aceito).
+A CLI mitiga em `story update` com responsáveis (decisão humana de 2026-09-30: "mitigar e documentar"):
+
+1. **releitura antes do PATCH:** relê a story logo antes de gravar; se `assigned_to` ou `assigned_users` mudaram
+   desde a leitura que calculou o patch, sai com `version_conflict` (exit 4) sem gravar. Não recalcula: o resto do
+   patch (tags, bloqueio, descrição) foi calculado da mesma leitura, e recalcular mudaria o resultado sem o
+   usuário ver;
+2. **pós-condição depois do PATCH:** relê e confere contra o pedido: quem devia entrar está, quem devia sair não
+   está, o responsável principal é o pedido (ou o de antes), e ninguém da releitura sumiu sem ser removido. Também
+   exige que a resposta do PATCH seja a `version` seguinte à da releitura; um salto indica outra escrita no meio,
+   inclusive uma troca de `assigned_to` que não deixa rastro. Se algo não bate, sai com
+   `assignees_postcondition_failed` (exit 4), dizendo que a escrita **foi aplicada**, com o estado encontrado. Não
+   há repetição automática.
+
+`--force-version` pula as duas conferências. **Janela residual:** entre a releitura final e o PATCH, uma troca
+concorrente de `assigned_to` ainda é gravada pelo Taiga e pode ser desfeita pelo nosso PATCH; a CLI então detecta
+e avisa (exit 4), mas não evita. Um falso alarme também é possível: qualquer escrita de outra pessoa nessa janela,
+mesmo em outro campo, faz a `version` saltar e gera o erro com a escrita aplicada.
+
