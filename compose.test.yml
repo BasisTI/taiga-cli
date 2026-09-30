@@ -43,7 +43,7 @@ services:
     image: taigaio/taiga-back:6.7.3
     environment: *back-env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       taiga-db:
         condition: service_healthy
