@@ -141,7 +141,9 @@ Observado em `TestProbeOCCIsPerField` (mesmo projeto descartável) e lido em `ta
 `get_modified_fields` junta as chaves do `diff` das últimas `diff_versions` entradas do histórico. O conflito só
 existe quando as chaves enviadas cruzam as chaves alteradas desde a versão enviada; com `version` antiga e
 campos disjuntos, o PATCH é aceito e a `version` sobe. O histórico grava a lista **armazenada** de
-`assigned_users` (`userstory_freezer`), não a da resposta.
+`assigned_users` (`userstory_freezer`), não a da resposta, e **não grava `assigned_to`**: em
+`taiga/projects/history/services.py`, `_deprecated_fields = {"userstories.userstory": frozenset(["assigned_to"])}`
+tira o campo do `diff`. Uma troca só de `assigned_to` nem gera entrada no histórico (`TestProbeOCCIgnoresAssignedTo`).
 
 | Requisição (com `version` antiga, depois de outra pessoa gravar `blocked_note`) | Resultado |
 |---|---|
@@ -152,11 +154,18 @@ campos disjuntos, o PATCH é aceito e a `version` sobe. O histórico grava a lis
 Regra da CLI: **todo PATCH envia cada campo de que o cálculo dependeu**, porque só esses são protegidos:
 
 - bloqueio: `--block` e `--unblock` enviam sempre o par `is_blocked` + `blocked_note`;
-- responsáveis: sempre que `assigned_users` vai no PATCH, `assigned_to` vai junto (a lista lida inclui o
-  principal, e a recusa de remover o principal depende dele);
 - tags, `--append-description`, status, milestone e swimlane já enviam o próprio campo de que dependem.
 
 Na escrita versionada da #246 (`WriteVersionedFrom`), a repetição única após conflito compara só as chaves do
-patch entre a leitura inicial e a releitura. Com a regra acima, isso cobre as dependências; o que a premissa
-"version antiga sempre conflita" escondia era só o caso de campos derivados não enviados, agora fechado. Um
-PATCH com responsáveis continua sem repetição (a lista armazenada não aparece na releitura).
+patch entre a leitura inicial e a releitura, e o servidor também só confere as chaves enviadas. A premissa
+"version antiga sempre conflita" só fazia diferença para campos de que o patch depende sem enviá-los; o único
+caso era o bloqueio (`--unblock` mandava só `is_blocked`, `--block` podia mandar só `blocked_note`), corrigido
+com o envio do par. Um PATCH com responsáveis continua sem repetição (a lista armazenada não aparece na
+releitura).
+
+**Limitação conhecida — `assigned_to`:** como o histórico ignora o campo, nenhum PATCH é protegido contra uma
+troca concorrente do responsável principal, nem mandando `assigned_to` junto (testado: aceito). Efeitos
+possíveis numa corrida estreita: `--remove-assignee X` enquanto outra pessoa torna X principal sai com exit 0 e X
+continua mostrado; `--owner-assignee`/`--clear-owner-assignee` sobrescreve a troca concorrente. A troca da lista
+armazenada é detectada normalmente. Fechar isso exigiria conferir o resultado relido depois da escrita (decisão
+de produto em aberto, não implementada).

@@ -182,3 +182,28 @@ func TestProbeOCCIsPerField(t *testing.T) {
 	}
 	t.Log("FINDING sending blocked_note with a stale version after a blocked_note change is a version conflict")
 }
+
+// assigned_to is a deprecated history field for stories (history/services.py _deprecated_fields),
+// so no history entry records it and the per-field OCC can never see a concurrent owner change.
+func TestProbeOCCIgnoresAssignedTo(t *testing.T) {
+	c := probeClient(t)
+	p := ensureProject(t, c, probeProjectAssign)
+	admin, svc := userID(t, c, p, testtaiga.AdminUser), userID(t, c, p, testtaiga.ServiceUser)
+	ensureMember(t, c, p, svc, testtaiga.ServiceUser)
+	s := createStory(t, c, p, "occ owner probe", map[string]any{"assigned_users": []int64{admin}, "assigned_to": svc})
+	path := fmt.Sprintf("userstories/%d", s.int("id"))
+	stale := s.int("version")
+	probeDo(t, c, "PATCH", path, nil, map[string]any{"version": stale, "assigned_to": admin})
+	r := probeDo(t, c, "PATCH", path, nil, map[string]any{"version": stale, "assigned_to": svc, "assigned_users": []int64{svc}})
+	if r.int("version") != stale+2 {
+		t.Fatalf("stale owner write: v%d", r.int("version"))
+	}
+	t.Log("FINDING a stale PATCH of assigned_to is accepted after a concurrent assigned_to change: OCC cannot protect it")
+	// A change of the stored list is recorded, so a stale PATCH of assigned_users conflicts.
+	probeDo(t, c, "PATCH", path, nil, map[string]any{"version": r.int("version"), "assigned_users": []int64{admin, svc}})
+	_, err := c.Do(context.Background(), Request{Method: "PATCH", Path: path, Body: map[string]any{"version": r.int("version"), "assigned_users": []int64{svc}}})
+	if probeStatus(err) != 400 {
+		t.Fatalf("stale list write: %v", err)
+	}
+	t.Log("FINDING a stale PATCH of assigned_users conflicts after a concurrent change of the stored list")
+}
