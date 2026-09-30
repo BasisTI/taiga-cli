@@ -99,7 +99,11 @@ Consequências na CLI:
   `--owner-assignee` ou `--clear-owner-assignee`.
 - Toda mudança de `assigned_to` envia também `assigned_users` com a lista completa, para não perder um responsável
   principal anterior que o Taiga descartaria.
-- A OCC cobre as duas chaves: se outra pessoa mexeu em `assigned_users` entre a leitura e o PATCH, `version_conflict`.
+- Um PATCH com `assigned_users` ou `assigned_to` não é repetido depois de conflito de versão: como a lista gravada
+  não aparece na resposta, a comparação campo a campo pode não ver a mudança de outra pessoa. Sai `version_conflict`
+  (exit 4), a menos que haja `--force-version`. Os demais campos seguem com a repetição única já existente.
+- `--remove-assignee` aceita qualquer usuário (username, id ou `me`), mesmo fora do projeto, para limpar ex-membros;
+  `--add-assignee`, `--assignee` e `--owner-assignee` exigem membro.
 
 ### Bloqueio
 

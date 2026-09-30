@@ -238,9 +238,14 @@ func checkAssigneeFlags(cmd *cobra.Command, update bool) error {
 func resolveAssignees(cmd *cobra.Command, service *app.Service, patch *app.Patch, update bool) error {
 	f := cmd.Flags()
 	resolve := func(name string) ([]int64, error) {
+		// Adding requires a member; removing does not, so a former member can be cleaned up.
+		find := service.Member
+		if name == "remove-assignee" {
+			find = service.User
+		}
 		ids := []int64{}
 		for _, v := range stringArray(cmd, name) {
-			user, err := service.Member(cmd.Context(), v)
+			user, err := find(cmd.Context(), v)
 			if err != nil {
 				return nil, err
 			}

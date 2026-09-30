@@ -108,7 +108,7 @@ func TestStoryAssigneeOutsideProjectIsNotFound(t *testing.T) {
 		{"story", "update", "246", "--add-assignee", "9"},
 		{"story", "update", "246", "--remove-assignee", "nobody"},
 		{"story", "update", "246", "--owner-assignee", "outsider"},
-		{"story", "update", "246", "--add-assignee", "svc", "--block", "x", "--remove-assignee", "outsider"},
+		{"story", "update", "246", "--add-assignee", "svc", "--block", "x", "--add-assignee", "outsider"},
 		{"story", "create", "--subject", "s", "--assignee", "outsider"},
 	} {
 		_, stderr, code := runIn(t, f.env(), "", args...)
@@ -168,7 +168,11 @@ func TestStoryAssigneeAndBlockConcurrentChanges(t *testing.T) {
 	}{
 		{"assignees", []string{"--add-assignee", "svc"}, func(s map[string]any) { s["assigned_users"] = []any{5, 9} }, 4, 1},
 		{"blocked_note", []string{"--block", "minha"}, func(s map[string]any) { s["blocked_note"] = "deles" }, 4, 1},
-		{"subject only", []string{"--add-assignee", "svc", "--block", "minha"}, func(s map[string]any) { s["subject"] = "outro" }, 0, 2},
+		{"subject only, block", []string{"--block", "minha"}, func(s map[string]any) { s["subject"] = "outro" }, 0, 2},
+		// assigned_users hides the stored list, so an unchanged answer proves nothing: no retry.
+		{"subject only, assignees", []string{"--add-assignee", "svc", "--block", "minha"}, func(s map[string]any) { s["subject"] = "outro" }, 4, 1},
+		{"subject only, owner", []string{"--owner-assignee", "svc"}, func(s map[string]any) { s["subject"] = "outro" }, 4, 1},
+		{"forced assignees", []string{"--add-assignee", "svc", "--force-version"}, func(s map[string]any) { s["assigned_users"] = []any{5, 9} }, 0, 2},
 	} {
 		f, calls := newStoryFake(t)
 		f.onPatch = func(s map[string]any) {
@@ -193,5 +197,19 @@ func TestStoryTextShowsOwnerAssigneesAndBlock(t *testing.T) {
 	out, stderr, code := runIn(t, f.env(), "", "story", "get", "248", "--output", "text")
 	if code != 0 || strings.Contains(out, "<nil>") || !strings.Contains(out, "assigned_users:  [6]") || !strings.Contains(out, "is_blocked:      true") {
 		t.Fatalf("%d %s\n%s", code, stderr, out)
+	}
+}
+
+// A former member left in assigned_users (or one added through the raw API) must still be removable.
+func TestStoryRemoveAssigneeOutsideProject(t *testing.T) {
+	f, calls := newStoryFake(t)
+	f.stories[6808]["assigned_users"] = []any{5, 9}
+	for _, sel := range []string{"outsider", "9"} {
+		f.stories[6808]["assigned_users"] = []any{5, 9}
+		_, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--remove-assignee", sel)
+		w := writes(calls)
+		if code != 0 || len(w) == 0 || bodyJSON(t, w[len(w)-1].body["assigned_users"]) != `[5]` {
+			t.Fatalf("%s: %d %s %+v", sel, code, stderr, w)
+		}
 	}
 }

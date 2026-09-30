@@ -75,9 +75,9 @@ func (s *Service) StoryView(o Object) (Object, error) {
 	return out, nil
 }
 
-// Member resolves a project member by exact username, id or "me". users?project= also lists
-// non-members (probe), so the id must appear in the project's memberships.
-func (s *Service) Member(ctx context.Context, selector string) (Object, error) {
+// User resolves a user by exact username, id or "me" in users?project=, which also lists
+// non-members (probe). Use it only where membership does not matter, like removing an assignee.
+func (s *Service) User(ctx context.Context, selector string) (Object, error) {
 	if selector == "me" {
 		me, err := Read(ctx, s.API, "users/me", nil)
 		if err != nil {
@@ -89,7 +89,13 @@ func (s *Service) Member(ctx context.Context, selector string) (Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	user, err := Resolve(users, selector, "username")
+	return Resolve(users, selector, "username")
+}
+
+// Member resolves a project member by exact username, id or "me": the id must appear in the
+// project's memberships.
+func (s *Service) Member(ctx context.Context, selector string) (Object, error) {
+	user, err := s.User(ctx, selector)
 	if err != nil {
 		return nil, err
 	}

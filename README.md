@@ -45,6 +45,7 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 - Statuses, milestones and swimlanes take a name or an id of the project; users take an exact username, an id or `me`, and must be project members. A name used twice is `ambiguous_name`.
 - `--tag` replaces the tags; `--add-tag`/`--remove-tag` merge with the current ones. Taiga stores tags in lower case, so the CLI sends them that way.
 - `--add-assignee`/`--remove-assignee` merge with the current assignees (`assigned_users`) and never change the main assignee (`assigned_to`); that takes `--owner-assignee` or `--clear-owner-assignee`. Taiga always shows the main assignee among the assignees, so removing them needs one of those two flags in the same command. Changing the main assignee keeps the others.
+- `--remove-assignee` also takes users who left the project. A write that changes assignees is not retried after a version conflict (exit 4; run it again, or use `--force-version`).
 - `--block NOTE` sets `is_blocked` with the note (required); `--unblock` clears both.
 - `close` without `--status` uses the project's only closed status; with several (the default template has `Done` and `Archived`) it asks for one.
 - Every write accepts `--dry-run` (prints method, path and body) and, except `create`, `--force-version`.
