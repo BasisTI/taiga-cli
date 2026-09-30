@@ -35,10 +35,19 @@ func (a *App) apiCmd() *cobra.Command {
 			if autoVersion && method != "PATCH" && method != "PUT" {
 				return usage("usage", "--auto-version only applies to PATCH and PUT")
 			}
+			if forceVersion && !autoVersion {
+				return usage("usage", "--force-version requires --auto-version")
+			}
+			if autoVersion && len(queries) > 0 {
+				return usage("usage", "--query cannot be combined with --auto-version")
+			}
+			if method == "GET" && (input != "" || len(fields) > 0 || len(rawFields) > 0) {
+				return usage("usage", "request body is not allowed with GET")
+			}
 			q := url.Values{}
 			for _, kv := range queries {
 				k, v, ok := strings.Cut(kv, "=")
-				if !ok {
+				if !ok || k == "" {
 					return usage("usage", "--query expects key=value: "+kv)
 				}
 				q.Add(k, v)
@@ -88,12 +97,17 @@ func (a *App) apiCmd() *cobra.Command {
 			if len(bytes.TrimSpace(resp.Body)) == 0 {
 				return nil
 			}
-			var pretty any
-			if json.Unmarshal(resp.Body, &pretty) != nil {
-				_, err = a.Out.Write(resp.Body)
-				return err
+			// Indent in place: keeps key order and big numbers exactly as Taiga sent them.
+			var buf bytes.Buffer
+			if json.Indent(&buf, resp.Body, "", "  ") != nil {
+				buf.Reset()
+				buf.Write(resp.Body)
 			}
-			return output.WriteJSON(a.Out, pretty)
+			if !bytes.HasSuffix(buf.Bytes(), []byte("\n")) {
+				buf.WriteByte('\n')
+			}
+			_, err = a.Out.Write(buf.Bytes())
+			return err
 		},
 	}
 	f := cmd.Flags()
@@ -127,6 +141,12 @@ func (a *App) buildBody(input string, fields, rawFields []string) (map[string]an
 		dec.UseNumber()
 		if err := dec.Decode(&body); err != nil {
 			return nil, &output.Error{Code: "usage", Cause: "--input must be a JSON object: " + err.Error(), Exit: output.ExitUsage}
+		}
+		if body == nil {
+			return nil, &output.Error{Code: "usage", Cause: "--input must be a JSON object, not null", Exit: output.ExitUsage}
+		}
+		if _, err := dec.Token(); err != io.EOF {
+			return nil, &output.Error{Code: "usage", Cause: "--input must be a single JSON object: unexpected data after it", Exit: output.ExitUsage}
 		}
 	}
 	set := func(kv string, raw bool) error {

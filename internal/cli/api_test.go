@@ -88,8 +88,8 @@ func TestAPIDeleteNeedsConfirmation(t *testing.T) {
 		t.Fatalf("code=%d calls=%d err=%s", code, len(*calls), errOut)
 	}
 	_, _, code = runIn(t, env, "", "api", "DELETE", "userstories/1", "--confirm-delete")
-	if code != 0 || len(*calls) != 1 {
-		t.Fatalf("confirmed delete: code=%d calls=%d", code, len(*calls))
+	if code != 0 || len(*calls) != 1 || (*calls)[0].method != "DELETE" || (*calls)[0].path != "/api/v1/userstories/1" {
+		t.Fatalf("confirmed delete: code=%d calls=%+v", code, *calls)
 	}
 }
 
@@ -161,5 +161,60 @@ func TestAPIUsageErrorsHaveNoSource(t *testing.T) {
 		if code != 2 || strings.Contains(errOut, `"source"`) {
 			t.Fatalf("%v: code=%d err=%s", args, code, errOut)
 		}
+	}
+}
+
+func TestAPIPrintsResponseVerbatimIndented(t *testing.T) {
+	srv, _ := fakeTaiga(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"z":1,"a":12345678901234567890,"m":{"y":true,"b":null}}`))
+	})
+	env := map[string]string{"TAIGA_URL": srv.URL, "TAIGA_TOKEN": "tok"}
+	out, errOut, code := runIn(t, env, "", "api", "GET", "userstories/1")
+	want := "{\n  \"z\": 1,\n  \"a\": 12345678901234567890,\n  \"m\": {\n    \"y\": true,\n    \"b\": null\n  }\n}\n"
+	if code != 0 || out != want {
+		t.Fatalf("code=%d err=%s out=%q", code, errOut, out)
+	}
+}
+
+func TestAPIPrintsNonJSONBodyRawWithNewline(t *testing.T) {
+	srv, _ := fakeTaiga(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("plain text")) })
+	env := map[string]string{"TAIGA_URL": srv.URL, "TAIGA_TOKEN": "tok"}
+	out, errOut, code := runIn(t, env, "", "api", "GET", "stats")
+	if code != 0 || out != "plain text\n" {
+		t.Fatalf("code=%d err=%s out=%q", code, errOut, out)
+	}
+}
+
+func TestAPIFlagCombinationUsageErrors(t *testing.T) {
+	srv, calls := fakeTaiga(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"version":1}`)) })
+	env := map[string]string{"TAIGA_URL": srv.URL, "TAIGA_TOKEN": "tok"}
+	cases := []struct {
+		stdin, want string
+		args        []string
+	}{
+		{"", "--force-version requires --auto-version", []string{"PATCH", "userstories/1", "--field", "a=1", "--force-version"}},
+		{"", "--query cannot be combined with --auto-version", []string{"PATCH", "userstories/1", "--field", "a=1", "--auto-version", "--query", "x=1"}},
+		{"", "--query cannot be combined with --auto-version", []string{"PATCH", "userstories/1", "--field", "a=1", "--auto-version", "--query", "x=1", "--dry-run"}},
+		{"", "--query expects key=value", []string{"GET", "userstories", "--query", "=v"}},
+		{"", "request body is not allowed with GET", []string{"GET", "userstories", "--field", "a=1"}},
+		{"", "request body is not allowed with GET", []string{"GET", "userstories", "--raw-field", "a=1"}},
+		{`{"a":1}`, "request body is not allowed with GET", []string{"GET", "userstories", "--input", "-"}},
+		{"", "request body is not allowed with GET", []string{"GET", "userstories", "--paginate", "--field", "a=1"}},
+		{`{"a":1} {"b":2}`, "--input must be a single JSON object", []string{"POST", "userstories", "--input", "-"}},
+		{`{"a":1} x`, "--input must be a single JSON object", []string{"POST", "userstories", "--input", "-"}},
+		{`null`, "--input must be a JSON object", []string{"POST", "userstories", "--input", "-"}},
+	}
+	for _, c := range cases {
+		_, errOut, code := runIn(t, env, c.stdin, append([]string{"api"}, c.args...)...)
+		if code != 2 || !strings.Contains(errOut, c.want) {
+			t.Errorf("%v: code=%d err=%s", c.args, code, errOut)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("usage errors must not call the API: %+v", *calls)
+	}
+	_, errOut, code := runIn(t, env, "{\"a\":1}\n\n", "api", "POST", "userstories", "--input", "-")
+	if code != 0 || len(*calls) != 1 || (*calls)[0].body["a"] != 1.0 {
+		t.Fatalf("trailing whitespace must be accepted: code=%d err=%s", code, errOut)
 	}
 }
