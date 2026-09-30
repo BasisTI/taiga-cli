@@ -66,7 +66,7 @@ func (a *App) root() *cobra.Command {
 		Short: "Print the taiga version",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintf(a.Out, "taiga %s\n", Version)
+			_, err := fmt.Fprintf(a.Out, "taiga %s\n", currentVersion())
 			return err
 		},
 	})
