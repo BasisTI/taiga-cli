@@ -40,7 +40,7 @@ func (a *App) readContent(path string) (string, error) {
 }
 
 // storyTextKeys is the text summary of a story; JSON output carries the whole object.
-var storyTextKeys = []string{"ref", "id", "version", "subject", "status", "is_closed", "tags", "url"}
+var storyTextKeys = []string{"ref", "id", "version", "subject", "status", "is_closed", "tags", "assigned_to", "assigned_users", "is_blocked", "url"}
 
 func (a *App) renderCurated(v any) error {
 	mode, err := output.DetectMode(a.output, a.OutTTY)
@@ -57,6 +57,9 @@ func (a *App) renderCurated(v any) error {
 			val, ok := x[k]
 			if !ok {
 				continue
+			}
+			if val == nil {
+				val = ""
 			}
 			if k == "status" {
 				if info, ok := x["status_extra_info"].(map[string]any); ok && info["name"] != nil {

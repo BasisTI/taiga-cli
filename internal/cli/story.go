@@ -164,6 +164,125 @@ func (a *App) resolveStoryValue(cmd *cobra.Command, service *app.Service, field,
 	return found["id"], nil
 }
 
+// assigneeFlags are the assignee and block flags: create takes the initial assignees, update
+// merges into the current ones and changes the main assignee only when asked.
+func assigneeFlags(cmd *cobra.Command, update bool) {
+	f := cmd.Flags()
+	if !update {
+		f.StringArray("assignee", nil, "initial assignee (project username, id or me), repeatable")
+		return
+	}
+	f.StringArray("add-assignee", nil, "add an assignee (project username, id or me), repeatable")
+	f.StringArray("remove-assignee", nil, "remove an assignee (project username, id or me), repeatable")
+	f.String("owner-assignee", "", "set the main assignee (assigned_to): project username, id or me")
+	f.Bool("clear-owner-assignee", false, "clear the main assignee (assigned_to)")
+	f.String("block", "", "block the story with a note")
+	f.Bool("unblock", false, "unblock the story and clear its note")
+}
+
+// stringArray returns the values of a StringArray flag. pflag's GetStringArray re-parses the
+// flag's String() form and turns a single empty value into no value at all.
+func stringArray(cmd *cobra.Command, name string) []string {
+	if flag := cmd.Flags().Lookup(name); flag != nil {
+		if v, ok := flag.Value.(interface{ GetSlice() []string }); ok {
+			return v.GetSlice()
+		}
+	}
+	return nil
+}
+
+// checkAssigneeFlags rejects blank selectors and contradictory flags before any request.
+func checkAssigneeFlags(cmd *cobra.Command, update bool) error {
+	f := cmd.Flags()
+	lists := []string{"assignee"}
+	if update {
+		lists = []string{"add-assignee", "remove-assignee"}
+	}
+	for _, name := range lists {
+		for _, v := range stringArray(cmd, name) {
+			if strings.TrimSpace(v) == "" {
+				return app.Usage("--" + name + " cannot be blank")
+			}
+		}
+	}
+	if !update {
+		return nil
+	}
+	owner, _ := f.GetString("owner-assignee")
+	if f.Changed("owner-assignee") && strings.TrimSpace(owner) == "" {
+		return app.Usage("--owner-assignee cannot be blank")
+	}
+	if f.Changed("owner-assignee") && f.Changed("clear-owner-assignee") {
+		return app.Usage("choose --owner-assignee or --clear-owner-assignee")
+	}
+	note, _ := f.GetString("block")
+	unblock, _ := f.GetBool("unblock")
+	if f.Changed("block") && unblock {
+		return app.Usage("choose --block or --unblock")
+	}
+	if f.Changed("block") && strings.TrimSpace(note) == "" {
+		return app.Usage("--block requires a note")
+	}
+	remove := stringArray(cmd, "remove-assignee")
+	for _, r := range remove {
+		for _, x := range append(stringArray(cmd, "add-assignee"), owner) {
+			if x == r {
+				return app.Usage("assignee cannot be added and removed together: " + r)
+			}
+		}
+	}
+	return nil
+}
+
+// resolveAssignees turns every assignee flag into project member ids in patch, before any write.
+func resolveAssignees(cmd *cobra.Command, service *app.Service, patch *app.Patch, update bool) error {
+	f := cmd.Flags()
+	resolve := func(name string) ([]int64, error) {
+		ids := []int64{}
+		for _, v := range stringArray(cmd, name) {
+			user, err := service.Member(cmd.Context(), v)
+			if err != nil {
+				return nil, err
+			}
+			ids = append(ids, app.ID(user["id"]))
+		}
+		return app.MergeIDs(nil, ids, nil), nil
+	}
+	if !update {
+		if f.Changed("assignee") {
+			ids, err := resolve("assignee")
+			if err != nil {
+				return err
+			}
+			patch.Set["assigned_users"] = ids
+		}
+		return nil
+	}
+	var err error
+	if patch.AddAssignees, err = resolve("add-assignee"); err != nil {
+		return err
+	}
+	if patch.RemoveAssignees, err = resolve("remove-assignee"); err != nil {
+		return err
+	}
+	if f.Changed("owner-assignee") {
+		value, _ := f.GetString("owner-assignee")
+		user, err := service.Member(cmd.Context(), value)
+		if err != nil {
+			return err
+		}
+		id := app.ID(user["id"])
+		patch.Owner = &id
+	}
+	patch.ClearOwner, _ = f.GetBool("clear-owner-assignee")
+	if f.Changed("block") {
+		note, _ := f.GetString("block")
+		patch.Block = &note
+	}
+	patch.Unblock, _ = f.GetBool("unblock")
+	return nil
+}
+
 func (a *App) storyWriteCmd(update bool) *cobra.Command {
 	var subject, descriptionFile, appendText, status, epic, milestone, swimlane string
 	var tags, addTags, removeTags []string
@@ -220,6 +339,9 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 		if f.Changed("epic") {
 			return errEpicLink
 		}
+		if err := checkAssigneeFlags(cmd, update); err != nil {
+			return err
+		}
 		patch := app.Patch{Set: app.Object{}, AddTags: add, RemoveTags: remove}
 		if f.Changed("subject") {
 			patch.Set["subject"] = subject
@@ -251,6 +373,9 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 			}
 			patch.Set[pair[0]] = value
 		}
+		if err := resolveAssignees(cmd, service, &patch, update); err != nil {
+			return err
+		}
 		var result any
 		if update {
 			result, err = service.UpdateStory(cmd.Context(), argv[0], patch, dry, force)
@@ -275,6 +400,7 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 		f.StringArrayVar(&addTags, "add-tag", nil, "add a tag, repeatable")
 		f.StringArrayVar(&removeTags, "remove-tag", nil, "remove a tag, repeatable")
 	}
+	assigneeFlags(cmd, update)
 	f.BoolVar(&dry, "dry-run", false, "print the request without sending it")
 	f.BoolVar(&force, "force-version", false, "on a version conflict, retry even if the same fields changed")
 	return cmd

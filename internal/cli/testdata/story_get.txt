@@ -1,8 +1,9 @@
-ref:        246
-id:         6808
-version:    7
-subject:    Stories na CLI
-status:     3
-is_closed:  false
-tags:       cli, go
-url:        http://taiga.test/project/infra-2025/us/246
+ref:             246
+id:              6808
+version:         7
+subject:         Stories na CLI
+status:          3
+is_closed:       false
+tags:            cli, go
+assigned_users:  [5]
+url:             http://taiga.test/project/infra-2025/us/246
