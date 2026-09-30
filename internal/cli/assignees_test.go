@@ -213,3 +213,13 @@ func TestStoryRemoveAssigneeOutsideProject(t *testing.T) {
 		}
 	}
 }
+
+// A boolean flag set to false is not a choice: only its value counts.
+func TestStoryFalseBooleanFlagsDoNotConflict(t *testing.T) {
+	f, calls := newStoryFake(t)
+	_, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--owner-assignee", "svc", "--clear-owner-assignee=false", "--block", "x", "--unblock=false")
+	w := writes(calls)
+	if code != 0 || len(w) != 1 || w[0].body["assigned_to"] != float64(6) || w[0].body["is_blocked"] != true {
+		t.Fatalf("%d %s %+v", code, stderr, w)
+	}
+}

@@ -212,7 +212,8 @@ func checkAssigneeFlags(cmd *cobra.Command, update bool) error {
 	if f.Changed("owner-assignee") && strings.TrimSpace(owner) == "" {
 		return app.Usage("--owner-assignee cannot be blank")
 	}
-	if f.Changed("owner-assignee") && f.Changed("clear-owner-assignee") {
+	clearOwner, _ := f.GetBool("clear-owner-assignee")
+	if f.Changed("owner-assignee") && clearOwner {
 		return app.Usage("choose --owner-assignee or --clear-owner-assignee")
 	}
 	note, _ := f.GetString("block")
