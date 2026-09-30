@@ -16,6 +16,7 @@ Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 202
 | `userstories/by_ref?ref=&project=` | validado na fase 2; ver seção abaixo | `TestProbeStoryByRef` |
 | Escrita de swimlane, upload de anexo, comentários no histórico | fases 2 e 3 | — |
 | Relação `assigned_to` × `assigned_users`, bloqueio | validado na fase 2; ver "responsáveis e bloqueio" | `TestProbeStoryAssignees`, `TestProbeStoryBlock` |
+| Campos customizados (definições e valores) de story e task | validado na fase 2; ver "campos customizados" | `TestProbeFieldDefinitions`, `TestProbeFieldValues`, `TestProbeTaskFieldValues` |
 
 ## Fase 2 — stories (US #246)
 
@@ -193,3 +194,30 @@ concorrente de `assigned_to` ainda é gravada pelo Taiga e pode ser desfeita pel
 e avisa (exit 4), mas não evita. Um falso alarme também é possível: qualquer escrita de outra pessoa nessa janela,
 mesmo em outro campo, faz a `version` saltar e gera o erro com a escrita aplicada.
 
+
+## Fase 2 — campos customizados (US #248)
+
+Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 2026-09-30, com `admin` no projeto
+descartável `cli-test-probe-fields`, onde `svc` é membro sem ser admin. Testes em
+`internal/taiga/fields_probe_integration_test.go`:
+`go test -tags integration -run '^TestProbe(Field|TaskField)' -v ./internal/taiga`. Código lido no container:
+`taiga/projects/custom_attributes/` (`models.py`, `validators.py`, `api.py`, `choices.py`).
+
+### Definições
+
+| Requisição | Resultado |
+|---|---|
+| `GET userstory-custom-attributes?project=<id>` e `task-custom-attributes?project=<id>` | lista com `id`, `name`, `description`, `type`, `order`, `project`, `extra`, `created_date`, `modified_date` |
+| `POST` com `project`, `name`, `type` (e `description` opcional) | 201; sem `description` nasce com `""` |
+| `version` em definição | **não existe**: nem na resposta, nem no modelo (sem `OCCModelMixin`) |
+| mesmo nome no mesmo projeto | 400 `{"name": ["Already exists one with the same name."], "project": [...]}`; `unique_together = ("project", "name")` no banco garante unicidade também numa corrida |
+| mesmo nome com outra caixa | aceito (201): o nome é sensível a caixa |
+| nome com 65 caracteres | 400 em `name` (`max_length=64`) |
+| tipo desconhecido | 400 em `type`. O catálogo do servidor (`choices.py`) tem `text`, `multiline`, `richtext`, `date`, `url`, `dropdown`, `checkbox`, `number`; a CLI aceita só os três validados aqui (`text`, `date`, `checkbox`) |
+| membro sem admin (`svc`) | lê a lista; `POST` 403 (exige `admin_project_values`) |
+| não membro de projeto privado | `GET ...?project=<id>` responde **200 `[]`**, sem erro *(manual)*. A CLI não chega aí: `projects/by_slug` já recusa o projeto antes |
+
+Consequência na CLI: `field create` é idempotente pela leitura do catálogo antes do `POST`; se outro processo criar a
+mesma definição entre a leitura e o `POST`, o 400 em `name` faz a CLI reler e aceitar a definição só se for
+compatível (mesmo tipo e, se `--description` foi dado, mesma descrição). O `POST` nunca é repetido. Definições
+existentes nunca são alteradas nem apagadas.

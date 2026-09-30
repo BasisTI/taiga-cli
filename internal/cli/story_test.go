@@ -116,6 +116,17 @@ type storyFake struct {
 	// acceptStale accepts a PATCH with an old version, as Taiga does when the fields sent did not
 	// change since (per-field OCC, docs/api-notes.md).
 	acceptStale bool
+	// defs holds custom field definitions by endpoint; values the custom-attributes-values
+	// resources by path. Both are created lazily by the field tests.
+	defs   map[string][]map[string]any
+	values map[string]map[string]any
+	tasks  map[int64]map[string]any
+	// onDefPost runs before a definition POST is handled (to simulate a concurrent create).
+	onDefPost func()
+	// onValues runs on each GET or PATCH of a values resource, before it is handled.
+	onValues func(method string, v map[string]any)
+	// badValuesWrite makes a successful values PATCH answer with a body that is not JSON.
+	badValuesWrite bool
 }
 
 func newStoryFake(t *testing.T) (*storyFake, *[]recorded) {
@@ -194,6 +205,9 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 			return false
 		}
 		return true
+	}
+	if f.handleFields(w, r, path) {
+		return
 	}
 	switch {
 	case r.Method == "GET" && (path == "projects/37" || path == "projects/by_slug" && q.Get("slug") == f.slug):
