@@ -21,9 +21,10 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("%s %s: HTTP %d: %s", e.Method, stagePath(e.Path), e.Status, truncate(e.Body))
 }
 
-// IsVersionConflict reports Taiga's optimistic-concurrency rejection (409, or 400 with a "version" key).
+// IsVersionConflict reports Taiga's optimistic-concurrency rejection: 409 or 412 (precondition
+// failed), or 400 with a "version" key, which is what Taiga 6.7 answers in practice.
 func (e *APIError) IsVersionConflict() bool {
-	if e.Status == 409 {
+	if e.Status == 409 || e.Status == 412 {
 		return true
 	}
 	if e.Status != 400 {

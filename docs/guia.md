@@ -29,6 +29,24 @@ project = "<slug-do-projeto>"
 
 A CLI procura o arquivo subindo a partir do diretório atual. Flags (`--url`, `--project`) e variáveis (`TAIGA_URL`, `TAIGA_PROJECT`) têm precedência. `TAIGA_TOKEN` e `TAIGA_PASSWORD` só são enviados a uma URL que venha de flag, env ou da config do usuário; se a URL vier só do `.taiga.toml`, a CLI recusa com `auth_untrusted_url`.
 
+## Stories
+
+Com o projeto no `.taiga.toml`, as stories são tratadas pela ref, o número que aparece na interface web:
+
+```sh
+taiga story list --assignee me --closed=false
+taiga story get 246
+taiga story create --subject "Nova story" --tag cli --description-file descricao.md
+taiga story update 246 --status "In progress" --add-tag cli --milestone "Sprint 12"
+taiga story update 246 --append-description "Entregue em staging."
+taiga story close 246 --status Done
+```
+
+- Toda escrita aceita `--dry-run`, que mostra método, caminho e corpo sem gravar. O `update` envia só os campos que mudam, com o `version` lido; se outra pessoa mudou os mesmos campos no meio, a CLI para com `version_conflict` (exit 4).
+- `--tag` substitui as tags; `--add-tag` e `--remove-tag` unem com as atuais. O Taiga grava tags em minúsculas.
+- `close` só muda o status para um status fechado: não arquiva nem exclui. No template padrão há dois status fechados (`Done` e `Archived`), então informe `--status`.
+- Vincular story a épico (`--epic`) ainda não é suportado: o Taiga faz o vínculo por um recurso à parte, sem `version`, e trocar o vínculo exige `DELETE`. Use a interface web por enquanto.
+
 ## `taiga api` para o que ainda não tem comando próprio
 
 Enquanto os comandos curados das próximas fases não chegam, `taiga api` cobre as receitas que hoje estão na skill `basis-ci-gitlab`. O caminho é relativo a `/api/v1/`, e `--auto-version` lê o `version` atual antes de gravar.

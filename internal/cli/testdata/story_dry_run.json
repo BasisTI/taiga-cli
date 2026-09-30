@@ -1,0 +1,13 @@
+{
+  "dry_run": true,
+  "method": "PATCH",
+  "path": "userstories/6808",
+  "body": {
+    "subject": "Novo título",
+    "tags": [
+      "cli",
+      "nova"
+    ],
+    "version": 7
+  }
+}
