@@ -175,7 +175,7 @@ func assignProject(t *testing.T) (map[string]string, string, string) {
 	}
 	if !member {
 		role := project["roles"].([]any)[0].(map[string]any)["id"]
-		storyJSON(t, env, "", "api", "POST", "memberships", "-F", "project="+pid, "-F", fmt.Sprintf("role=%v", role), "-f", "username="+testtaiga.ServiceUser)
+		storyJSON(t, env, "", "api", "POST", "memberships", "-F", "project="+pid, "-F", fmt.Sprintf("role=%v", role), "-f", "username="+testtaiga.ServiceEmail)
 	}
 	return env, users[testtaiga.AdminUser], users[testtaiga.ServiceUser]
 }

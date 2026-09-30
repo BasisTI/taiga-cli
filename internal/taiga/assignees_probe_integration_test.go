@@ -18,8 +18,9 @@ import (
 // cli-test keeps svc out: TestProbeUsersCatalogScope needs a non-member there.
 const probeProjectAssign = "cli-test-probe-assign"
 
-// ensureMember adds username to project with its first role, unless already a member.
-func ensureMember(t *testing.T, c *Client, project, user int64, username string) {
+// ensureMember adds the user with this email to project with its first role, unless
+// already a member. It posts the email, not the username: see testtaiga.ServiceEmail.
+func ensureMember(t *testing.T, c *Client, project, user int64, email string) {
 	t.Helper()
 	q := url.Values{"project": {fmt.Sprint(project)}}
 	for _, m := range probeList(t, c, "memberships", q) {
@@ -32,7 +33,7 @@ func ensureMember(t *testing.T, c *Client, project, user int64, username string)
 	if err := json.Unmarshal(p["roles"], &roles); err != nil || len(roles) == 0 {
 		t.Fatalf("roles: %v %s", err, p["roles"])
 	}
-	probeDo(t, c, "POST", "memberships", nil, map[string]any{"project": project, "role": roles[0].ID, "username": username})
+	probeDo(t, c, "POST", "memberships", nil, map[string]any{"project": project, "role": roles[0].ID, "username": email})
 }
 
 func userID(t *testing.T, c *Client, project int64, username string) int64 {
@@ -79,7 +80,7 @@ func TestProbeStoryAssignees(t *testing.T) {
 	c := probeClient(t)
 	p := ensureProject(t, c, probeProjectAssign)
 	admin, svc := userID(t, c, p, testtaiga.AdminUser), userID(t, c, p, testtaiga.ServiceUser)
-	ensureMember(t, c, p, svc, testtaiga.ServiceUser)
+	ensureMember(t, c, p, svc, testtaiga.ServiceEmail)
 
 	// assigned_to always shows up in assigned_users, even when the list sent omits it.
 	s := createStory(t, c, p, "assignees: owner outside list", map[string]any{"assigned_to": svc, "assigned_users": []int64{admin}})
@@ -189,7 +190,7 @@ func TestProbeOCCIgnoresAssignedTo(t *testing.T) {
 	c := probeClient(t)
 	p := ensureProject(t, c, probeProjectAssign)
 	admin, svc := userID(t, c, p, testtaiga.AdminUser), userID(t, c, p, testtaiga.ServiceUser)
-	ensureMember(t, c, p, svc, testtaiga.ServiceUser)
+	ensureMember(t, c, p, svc, testtaiga.ServiceEmail)
 	s := createStory(t, c, p, "occ owner probe", map[string]any{"assigned_users": []int64{admin}, "assigned_to": svc})
 	path := fmt.Sprintf("userstories/%d", s.int("id"))
 	stale := s.int("version")
