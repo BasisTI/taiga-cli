@@ -21,30 +21,44 @@ type Paths struct {
 }
 
 // DefaultPaths honours TAIGA_CONFIG, TAIGA_STATE_DIR and the XDG base directories.
+// Relative XDG_* (and HOME) values are ignored, as the XDG spec requires.
 func DefaultPaths(env func(string) string) (Paths, error) {
-	home := env("HOME")
-	configHome := env("XDG_CONFIG_HOME")
-	if configHome == "" {
-		if home == "" {
-			return Paths{}, &output.Error{Code: "config_no_home", Source: "env", Cause: "HOME and XDG_CONFIG_HOME are unset", Recovery: "set TAIGA_CONFIG and TAIGA_STATE_DIR", Exit: output.ExitUsage}
+	abs := func(k string) string {
+		if v := env(k); filepath.IsAbs(v) {
+			return v
 		}
-		configHome = filepath.Join(home, ".config")
+		return ""
 	}
-	stateHome := env("XDG_STATE_HOME")
-	if stateHome == "" {
-		stateHome = filepath.Join(home, ".local", "state")
+	noBase := func(vars string) (Paths, error) {
+		return Paths{}, &output.Error{Code: "config_no_home", Source: "env", Cause: "HOME and " + vars + " are unset or not absolute", Recovery: "set TAIGA_CONFIG and TAIGA_STATE_DIR", Exit: output.ExitUsage}
 	}
-	p := Paths{
-		ConfigFile: filepath.Join(configHome, "taiga", "config.toml"),
-		StateDir:   filepath.Join(stateHome, "taiga"),
-		SecretsDir: filepath.Join(configHome, "taiga", "secrets"),
-	}
+	home := abs("HOME")
+	var p Paths
 	if v := env("TAIGA_CONFIG"); v != "" {
 		p.ConfigFile = v
 		p.SecretsDir = filepath.Join(filepath.Dir(v), "secrets")
+	} else {
+		configHome := abs("XDG_CONFIG_HOME")
+		if configHome == "" {
+			if home == "" {
+				return noBase("XDG_CONFIG_HOME")
+			}
+			configHome = filepath.Join(home, ".config")
+		}
+		p.ConfigFile = filepath.Join(configHome, "taiga", "config.toml")
+		p.SecretsDir = filepath.Join(configHome, "taiga", "secrets")
 	}
 	if v := env("TAIGA_STATE_DIR"); v != "" {
 		p.StateDir = v
+	} else {
+		stateHome := abs("XDG_STATE_HOME")
+		if stateHome == "" {
+			if home == "" {
+				return noBase("XDG_STATE_HOME")
+			}
+			stateHome = filepath.Join(home, ".local", "state")
+		}
+		p.StateDir = filepath.Join(stateHome, "taiga")
 	}
 	return p, nil
 }
@@ -106,6 +120,10 @@ func WriteFileAtomic(path string, data []byte) error {
 		_ = tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
@@ -131,19 +149,20 @@ func (f *File) Upsert(h Host) {
 	f.Hosts = append(f.Hosts, h)
 }
 
-// NormalizeURL returns scheme://host[:port] without trailing slash or /api/v1 suffix.
+// NormalizeURL returns scheme://host[:port] (host lowercased) without trailing slash or /api/v1 suffix.
 func NormalizeURL(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	u, err := url.Parse(trimmed)
 	fail := func(cause string) (string, error) {
-		return "", &output.Error{Code: "config_invalid_url", Source: "config", Cause: fmt.Sprintf("%q: %s", raw, cause), Recovery: "use https://host (http only for localhost)", Exit: output.ExitUsage}
+		return "", &output.Error{Code: "config_invalid_url", Source: "config", Cause: urlForError(trimmed, u, err) + cause, Recovery: "use https://host (http only for localhost)", Exit: output.ExitUsage}
 	}
-	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Host == "" {
 		return fail("not an absolute URL")
 	}
-	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(trimmed, "#") {
 		return fail("userinfo, query and fragment are not allowed")
 	}
-	host := u.Hostname()
+	host := strings.ToLower(u.Hostname())
 	local := host == "localhost" || host == "127.0.0.1" || host == "::1"
 	if u.Scheme != "https" && (u.Scheme != "http" || !local) {
 		return fail("scheme must be https")
@@ -152,5 +171,16 @@ func NormalizeURL(raw string) (string, error) {
 	if strings.Trim(p, "/") != "" {
 		return fail("path prefixes are not supported")
 	}
-	return u.Scheme + "://" + u.Host, nil
+	return u.Scheme + "://" + strings.ToLower(u.Host), nil
+}
+
+// urlForError renders the URL for an error cause without ever echoing userinfo.
+func urlForError(raw string, u *url.URL, parseErr error) string {
+	if !strings.Contains(raw, "@") {
+		return fmt.Sprintf("%q: ", raw)
+	}
+	if parseErr == nil && u.User != nil && u.Opaque == "" {
+		return fmt.Sprintf("%q: ", u.Redacted())
+	}
+	return ""
 }

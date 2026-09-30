@@ -58,3 +58,36 @@ func TestResolveNoURL(t *testing.T) {
 		t.Fatal("expected config_no_url")
 	}
 }
+
+func TestResolveInvalidURL(t *testing.T) {
+	_, err := Resolve(Inputs{FlagURL: "http://agile.example", Env: envMap(nil), Cwd: t.TempDir()})
+	if !isCode(err, "config_invalid_url") {
+		t.Fatalf("want config_invalid_url, got %v", err)
+	}
+}
+
+func TestResolveMalformedRepoFile(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, ".taiga.toml"), []byte("url = \n"), 0o644)
+	_, err := Resolve(Inputs{Env: envMap(nil), Cwd: dir})
+	if !isCode(err, "config_invalid") {
+		t.Fatalf("want config_invalid, got %v", err)
+	}
+}
+
+func TestLoadUnreadableConfig(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores file permissions")
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("default_host = \"https://a.example\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	if _, err := Load(path); !isCode(err, "config_unreadable") {
+		t.Fatalf("want config_unreadable, got %v", err)
+	}
+}
