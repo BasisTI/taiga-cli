@@ -2,6 +2,21 @@
 # Seeds the local test Taiga: admin + service account + one project. Test-only credentials.
 set -euo pipefail
 URL="${TAIGA_TEST_URL:-http://localhost:8000}"
+
+# Safety: never seed anything but a local Taiga (tests must not write to agile.basis.com.br).
+host="${URL#*://}"; host="${host%%/*}"; host="${host##*@}"
+if [[ "$host" == \[* ]]; then host="${host%%]*}]"; else host="${host%%:*}"; fi
+remote=1
+case "$host" in
+  localhost|127.0.0.1|'[::1]') remote=0 ;;
+  *.*) ;;
+  *) remote=0 ;; # single-label host: compose service name
+esac
+if [[ "$remote" == 1 && "${TAIGA_TEST_ALLOW_REMOTE:-}" != 1 ]]; then
+  echo "error: refusing to seed non-local TAIGA_TEST_URL host '$host' (set TAIGA_TEST_ALLOW_REMOTE=1 to override)" >&2
+  exit 1
+fi
+
 COMPOSE=(docker compose -f "$(dirname "$0")/../compose.test.yml")
 
 echo "waiting for $URL/api/v1/ ..."
@@ -22,8 +37,13 @@ if not U.objects.filter(username="svc").exists():
 
 TOKEN=$(curl -fsS -X POST "$URL/api/v1/auth" -H 'Content-Type: application/json' \
   -d '{"type":"normal","username":"admin","password":"admin123"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["auth_token"])')
-if ! curl -fsS "$URL/api/v1/projects/by_slug?slug=cli-test" -H "Authorization: Bearer $TOKEN" >/dev/null 2>&1; then
-  curl -fsS -X POST "$URL/api/v1/projects" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-    -d '{"name":"cli-test","description":"taiga-cli integration tests","creation_template":1}' >/dev/null
-fi
+code=$(curl -sS -o /dev/null -w '%{http_code}' "$URL/api/v1/projects/by_slug?slug=cli-test" -H "Authorization: Bearer $TOKEN") || {
+  echo "error: project lookup failed" >&2; exit 1; }
+case "$code" in
+  200) ;;
+  404)
+    curl -fsS -X POST "$URL/api/v1/projects" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+      -d '{"name":"cli-test","description":"taiga-cli integration tests","creation_template":1}' >/dev/null ;;
+  *) echo "error: project lookup returned HTTP $code" >&2; exit 1 ;;
+esac
 echo "seeded: admin/admin123, svc/svc12345, project cli-test"
