@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sort"
 )
 
@@ -84,13 +85,23 @@ func changedKeys(patch map[string]any, a, b map[string]json.RawMessage) []string
 	return out
 }
 
+// jsonEqual compares two JSON values semantically: object key order and whitespace do not
+// matter, numbers compare exactly (UseNumber), and a missing value equals null.
 func jsonEqual(x, y json.RawMessage) bool {
-	var bx, by bytes.Buffer
-	if len(x) > 0 && json.Compact(&bx, x) != nil {
-		return false
+	vx, okx := decodeJSON(x)
+	vy, oky := decodeJSON(y)
+	return okx && oky && reflect.DeepEqual(vx, vy)
+}
+
+func decodeJSON(raw json.RawMessage) (any, bool) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, true
 	}
-	if len(y) > 0 && json.Compact(&by, y) != nil {
-		return false
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, false
 	}
-	return bytes.Equal(bx.Bytes(), by.Bytes())
+	return v, true
 }

@@ -165,3 +165,23 @@ func TestWriteVersionedNonConflictErrorIsReturnedWithoutReread(t *testing.T) {
 		t.Fatalf("gets=%d patches=%d err=%v", gets, patches, err)
 	}
 }
+
+func TestChangedKeysComparesJSONSemantically(t *testing.T) {
+	a := map[string]json.RawMessage{
+		"custom": json.RawMessage(`{"a":1,"b":[1,{"x":true,"y":null}]}`),
+		"n":      json.RawMessage(`12345678901234567890`),
+		"gone":   json.RawMessage(`null`),
+	}
+	b := map[string]json.RawMessage{
+		"custom": json.RawMessage(`{ "b": [1, {"y": null, "x": true}], "a": 1 }`),
+		"n":      json.RawMessage(`12345678901234567890`),
+	}
+	patch := map[string]any{"custom": 0, "n": 0, "gone": 0}
+	if got := changedKeys(patch, a, b); len(got) != 0 {
+		t.Fatalf("same JSON in another key order must not conflict: %v", got)
+	}
+	b["n"] = json.RawMessage(`12345678901234567891`)
+	if got := changedKeys(patch, a, b); len(got) != 1 || got[0] != "n" {
+		t.Fatalf("big integers must compare exactly: %v", got)
+	}
+}
