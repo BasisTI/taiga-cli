@@ -119,16 +119,11 @@ func AssignmentPatch(before Object, p Patch) (Object, error) {
 			out["assigned_users"] = users
 		}
 	}
-	if p.Block != nil {
-		if before["is_blocked"] != true {
-			out["is_blocked"] = true
-		}
-		if before["blocked_note"] != *p.Block {
-			out["blocked_note"] = *p.Block
-		}
-	}
 	// Taiga's OCC protects only the fields a PATCH sends (docs/api-notes.md, "OCC por campo"), so
 	// a block change always sends the pair it was computed from.
+	if p.Block != nil && (before["is_blocked"] != true || before["blocked_note"] != *p.Block) {
+		out["is_blocked"], out["blocked_note"] = true, *p.Block
+	}
 	if p.Unblock && (before["is_blocked"] != false || before["blocked_note"] != "") {
 		out["is_blocked"], out["blocked_note"] = false, ""
 	}

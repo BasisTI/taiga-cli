@@ -279,6 +279,7 @@ func TestIntegrationStoryBlockRaces(t *testing.T) {
 		note       string
 	}{
 		{"unblock keeps a concurrent note", []string{"--unblock"}, []string{"-f", "blocked_note=nota concorrente"}, true, "nota concorrente"},
+		{"block does not succeed after a concurrent unblock", []string{"--block", "minha nota"}, []string{"-F", "is_blocked=false"}, false, ""},
 	} {
 		s := storyJSON(t, env, "", "api", "POST", "userstories", "-F", fmt.Sprintf("project=%v", pid), "-f", "subject=block race", "-F", "is_blocked=true")
 		code, patches := raceUpdate(t, env, s, tc.concurrent, tc.args...)

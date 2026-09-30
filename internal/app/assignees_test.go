@@ -108,9 +108,10 @@ func TestAssignmentPatchBlockUnblockAndInvalidCombinations(t *testing.T) {
 	if err != nil || got["is_blocked"] != true || got["blocked_note"] != note {
 		t.Fatalf("%v %v", got, err)
 	}
+	// Re-blocking with another note also sends is_blocked: a concurrent unblock is then a conflict.
 	got, err = AssignmentPatch(Object{"is_blocked": true, "blocked_note": "old"}, Patch{Block: &note})
-	if _, ok := got["is_blocked"]; err != nil || ok || got["blocked_note"] != note {
-		t.Fatalf("re-block changes only the note: %v %v", got, err)
+	if err != nil || len(got) != 2 || got["is_blocked"] != true || got["blocked_note"] != note {
+		t.Fatalf("re-block pair: %v %v", got, err)
 	}
 	got, err = AssignmentPatch(Object{"is_blocked": true, "blocked_note": note}, Patch{Unblock: true})
 	if err != nil || got["is_blocked"] != false || got["blocked_note"] != "" {
