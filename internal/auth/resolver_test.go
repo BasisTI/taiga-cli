@@ -234,3 +234,20 @@ func TestReadOnlyExpiredSessionWithStoredSecretIsSessionExpired(t *testing.T) {
 		t.Fatalf("%+v logins=%d refreshes=%d", e, f.logins, f.refreshes)
 	}
 }
+
+// Codex review #1: `taiga auth refresh` with an existing .lock in a read-only
+// sessions dir must not spend the persisted refresh token.
+func TestForceRefreshReadOnlyWithExistingLockDoesNotBurnRefresh(t *testing.T) {
+	f := newFakeAuth(t)
+	ref := SessionRef(f.srv.URL, "svc")
+	f.valid.Store("r0", true)
+	dir := readOnlyStateDir(t, &Session{URL: f.srv.URL, Username: "svc", AuthToken: "old", Refresh: "r0", Expiry: time.Now().Add(-time.Hour)}, ref)
+	_, err := newResolver(f, dir, nil).ForceRefresh(context.Background())
+	e := output.AsError(err)
+	if e.Code != "session_cache_readonly" || e.Exit != output.ExitAuth || e.Recovery != "run `taiga auth refresh` outside the sandbox" {
+		t.Fatalf("%+v", e)
+	}
+	if f.refreshes != 0 {
+		t.Fatal("persisted refresh token was spent")
+	}
+}

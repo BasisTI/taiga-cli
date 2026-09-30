@@ -147,14 +147,19 @@ func (r *Resolver) LoginWith(ctx context.Context, password []byte) (Session, err
 
 // ForceRefresh renews the stored session regardless of its expiry (taiga auth refresh).
 func (r *Resolver) ForceRefresh(ctx context.Context) (Session, error) {
+	readOnly := &output.Error{Code: "session_cache_readonly", Source: "session_cache", Stage: r.Store.Path(r.ref()), Cause: "cannot renew: the session cache is read-only", Recovery: "run `taiga auth refresh` outside the sandbox", Exit: output.ExitAuth}
 	unlock, err := r.Store.Lock(ctx, r.ref())
 	if errors.Is(err, ErrReadOnly) {
-		return Session{}, &output.Error{Code: "session_cache_readonly", Source: "session_cache", Stage: r.Store.Path(r.ref()), Cause: "cannot renew: the session cache is read-only", Recovery: "run `taiga auth refresh` outside the sandbox", Exit: output.ExitAuth}
+		return Session{}, readOnly
 	}
 	if err != nil {
 		return Session{}, err
 	}
 	defer unlock()
+	// An existing lock file opens even in a read-only directory: probe before spending the refresh token.
+	if !r.Store.Writable() {
+		return Session{}, readOnly
+	}
 	sess, err := r.Store.Load(r.ref())
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return Session{}, err
