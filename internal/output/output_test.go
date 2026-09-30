@@ -71,3 +71,11 @@ func TestWriteJSONKeepsUnicodeAndControlChars(t *testing.T) {
 		t.Fatal("HTML escaping must be off")
 	}
 }
+
+func TestWriteErrorTextWithoutCause(t *testing.T) {
+	var b bytes.Buffer
+	_ = WriteError(&b, Text, &Error{Code: "usage", Exit: ExitUsage})
+	if first := strings.SplitN(b.String(), "\n", 2)[0]; first != "error [usage]" {
+		t.Fatalf("first line = %q", first)
+	}
+}

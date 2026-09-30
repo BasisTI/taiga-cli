@@ -48,8 +48,11 @@ func (a *App) root() *cobra.Command {
 		Short:         "Command line client for the Taiga REST API",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		PersistentPreRun: func(*cobra.Command, []string) {
+		PersistentPreRunE: func(*cobra.Command, []string) error {
+			// Flags parsed: from here on errors come from the command, not from cobra.
 			a.ran = true
+			_, err := output.DetectMode(a.output, a.OutTTY)
+			return err
 		},
 	}
 	root.PersistentFlags().StringVar(&a.output, "output", "", "output format: json or text (default: text on a terminal, json otherwise)")

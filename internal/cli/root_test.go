@@ -35,3 +35,13 @@ func TestUnknownCommandIsUsageError(t *testing.T) {
 		t.Fatalf("stderr = %s", errOut)
 	}
 }
+
+func TestInvalidOutputIsUsageError(t *testing.T) {
+	out, errOut, code := run(t, nil, "--output", "yaml", "version")
+	if code != 2 || out != "" {
+		t.Fatalf("exit = %d, out = %q, stderr = %s", code, out, errOut)
+	}
+	if !strings.Contains(errOut, "error [usage]") || !strings.Contains(errOut, `invalid --output "yaml"`) {
+		t.Fatalf("stderr = %s", errOut)
+	}
+}

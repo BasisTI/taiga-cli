@@ -73,7 +73,10 @@ func WriteError(w io.Writer, m Mode, e *Error) error {
 	if m == JSON {
 		return WriteJSON(w, map[string]*Error{"error": e})
 	}
-	s := fmt.Sprintf("error [%s]: %s\n", e.Code, e.Cause)
+	s := fmt.Sprintf("error [%s]\n", e.Code)
+	if e.Cause != "" {
+		s = fmt.Sprintf("error [%s]: %s\n", e.Code, e.Cause)
+	}
 	if e.Stage != "" {
 		s += fmt.Sprintf("  at: %s\n", e.Stage)
 	}

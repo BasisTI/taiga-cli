@@ -24,7 +24,7 @@ func (a *App) apiCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			method, path := strings.ToUpper(args[0]), strings.TrimPrefix(args[1], "/")
 			usage := func(code, cause string) error {
-				return &output.Error{Code: code, Source: "flag", Cause: cause, Exit: output.ExitUsage}
+				return &output.Error{Code: code, Cause: cause, Exit: output.ExitUsage}
 			}
 			if method == "DELETE" && !confirmDelete {
 				return usage("delete_not_confirmed", "DELETE requires --confirm-delete")
@@ -118,7 +118,7 @@ func (a *App) buildBody(input string, fields, rawFields []string) (map[string]an
 		} else {
 			f, err := os.Open(input)
 			if err != nil {
-				return nil, &output.Error{Code: "usage", Source: "flag", Cause: err.Error(), Exit: output.ExitUsage}
+				return nil, &output.Error{Code: "usage", Cause: err.Error(), Exit: output.ExitUsage}
 			}
 			defer func() { _ = f.Close() }()
 			r = f
@@ -126,13 +126,13 @@ func (a *App) buildBody(input string, fields, rawFields []string) (map[string]an
 		dec := json.NewDecoder(r)
 		dec.UseNumber()
 		if err := dec.Decode(&body); err != nil {
-			return nil, &output.Error{Code: "usage", Source: "flag", Cause: "--input must be a JSON object: " + err.Error(), Exit: output.ExitUsage}
+			return nil, &output.Error{Code: "usage", Cause: "--input must be a JSON object: " + err.Error(), Exit: output.ExitUsage}
 		}
 	}
 	set := func(kv string, raw bool) error {
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok || k == "" {
-			return &output.Error{Code: "usage", Source: "flag", Cause: "field expects key=value: " + kv, Exit: output.ExitUsage}
+			return &output.Error{Code: "usage", Cause: "field expects key=value: " + kv, Exit: output.ExitUsage}
 		}
 		if body == nil {
 			body = map[string]any{}

@@ -147,3 +147,19 @@ func TestRunNeverExitsZeroAfterError(t *testing.T) {
 		t.Fatalf("err = %s", errOut.String())
 	}
 }
+
+func TestAPIUsageErrorsHaveNoSource(t *testing.T) {
+	env := map[string]string{"TAIGA_URL": "https://t.example", "TAIGA_TOKEN": "tok"}
+	for _, args := range [][]string{
+		{"api", "DELETE", "userstories/1"},
+		{"api", "POST", "userstories", "--paginate"},
+		{"api", "GET", "userstories", "--query", "novalue"},
+		{"api", "POST", "userstories", "--field", "=x"},
+		{"api", "POST", "userstories", "--input", "/nonexistent/body.json"},
+	} {
+		_, errOut, code := runIn(t, env, "", args...)
+		if code != 2 || strings.Contains(errOut, `"source"`) {
+			t.Fatalf("%v: code=%d err=%s", args, code, errOut)
+		}
+	}
+}
