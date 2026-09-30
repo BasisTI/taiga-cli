@@ -1,0 +1,105 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/BasisTI/taiga-cli/internal/app"
+	"github.com/BasisTI/taiga-cli/internal/output"
+	"github.com/spf13/cobra"
+)
+
+// service builds the per-run application service; credentials come only from App.client.
+func (a *App) service(cmd *cobra.Command) (*app.Service, error) {
+	rc, err := a.runContext()
+	if err != nil {
+		return nil, err
+	}
+	c, err := a.client(cmd.Context(), rc)
+	if err != nil {
+		return nil, err
+	}
+	return app.New(cmd.Context(), c, rc.Ctx.Project.Value)
+}
+
+// readContent returns the exact bytes of FILE, or of stdin for "-".
+func (a *App) readContent(path string) (string, error) {
+	if path == "-" {
+		b, err := io.ReadAll(a.In)
+		return string(b), err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", app.Usage("cannot read input file: " + err.Error())
+	}
+	return string(b), nil
+}
+
+// storyTextKeys is the text summary of a story; JSON output carries the whole object.
+var storyTextKeys = []string{"ref", "id", "version", "subject", "status", "is_closed", "tags", "url"}
+
+func (a *App) renderCurated(v any) error {
+	mode, err := output.DetectMode(a.output, a.OutTTY)
+	if err != nil {
+		return err
+	}
+	if mode == output.JSON {
+		return output.WriteJSON(a.Out, v)
+	}
+	switch x := v.(type) {
+	case app.Object:
+		fields := []output.Field{}
+		for _, k := range storyTextKeys {
+			val, ok := x[k]
+			if !ok {
+				continue
+			}
+			if k == "status" {
+				if info, ok := x["status_extra_info"].(map[string]any); ok && info["name"] != nil {
+					val = fmt.Sprintf("%v (%v)", info["name"], val)
+				}
+			}
+			if names, ok := val.([]string); ok {
+				val = strings.Join(names, ", ")
+			}
+			fields = append(fields, output.Field{Key: k, Value: fmt.Sprint(val)})
+		}
+		return output.WriteFields(a.Out, fields)
+	case []app.Object:
+		for i, o := range x {
+			if i > 0 {
+				if _, err := fmt.Fprintln(a.Out); err != nil {
+					return err
+				}
+			}
+			if err := a.renderCurated(o); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		// Dry-run plans are nested: text mode prints each top-level key with its JSON value.
+		b, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(b, &object); err != nil {
+			return err
+		}
+		keys := []string{}
+		for k := range object {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		fields := []output.Field{}
+		for _, k := range keys {
+			fields = append(fields, output.Field{Key: k, Value: string(object[k])})
+		}
+		return output.WriteFields(a.Out, fields)
+	}
+}

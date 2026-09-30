@@ -24,6 +24,7 @@ func fakeTaiga(t *testing.T, handle func(w http.ResponseWriter, r *http.Request)
 	var calls []recorded
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(b)) // the handler can read it again
 		var body map[string]any
 		_ = json.Unmarshal(b, &body)
 		mu.Lock()

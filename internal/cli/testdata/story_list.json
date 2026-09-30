@@ -1,0 +1,62 @@
+[
+  {
+    "assigned_users": [
+      5
+    ],
+    "description": "",
+    "epics": [
+      {
+        "id": 90,
+        "ref": 9
+      }
+    ],
+    "id": 6808,
+    "is_closed": false,
+    "milestone": null,
+    "project": 37,
+    "ref": 246,
+    "status": 3,
+    "subject": "Stories na CLI",
+    "swimlane": null,
+    "tags": [
+      "cli",
+      "go"
+    ],
+    "total_points": 12345678901234567891,
+    "unknown_key": "kept",
+    "url": "http://taiga.test/project/infra-2025/us/246",
+    "version": 7
+  },
+  {
+    "assigned_users": [],
+    "description": "linha",
+    "epics": null,
+    "id": 6809,
+    "is_closed": true,
+    "project": 37,
+    "ref": 247,
+    "status": 5,
+    "subject": "Responsáveis",
+    "tags": [
+      "cli"
+    ],
+    "url": "http://taiga.test/project/infra-2025/us/247",
+    "version": 2
+  },
+  {
+    "assigned_users": [
+      6
+    ],
+    "description": "",
+    "epics": null,
+    "id": 6810,
+    "is_closed": false,
+    "project": 37,
+    "ref": 248,
+    "status": 1,
+    "subject": "Campos",
+    "tags": [],
+    "url": "http://taiga.test/project/infra-2025/us/248",
+    "version": 1
+  }
+]
