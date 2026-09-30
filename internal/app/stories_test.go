@@ -177,6 +177,9 @@ func TestEpicResolvesByRefNeverByID(t *testing.T) {
 	if e, err := s.Epic(context.Background(), "9"); err != nil || ID(e["id"]) != 4 {
 		t.Fatalf("%v %v", e, err)
 	}
+	if e, err := s.Epic(context.Background(), "009"); err != nil || ID(e["id"]) != 4 {
+		t.Fatalf("leading zeros: %v %v", e, err)
+	}
 	if _, err := s.Epic(context.Background(), "4"); exitOf(err) != output.ExitNotFound {
 		t.Fatalf("id accepted as ref: %v", err)
 	}

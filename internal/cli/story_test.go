@@ -395,6 +395,8 @@ func TestStoryListPaginatesAndFilters(t *testing.T) {
 		want string
 	}{
 		{[]string{"--ref", "247"}, "247"},
+		{[]string{"--ref", "0247"}, "247"},
+		{[]string{"--epic", "009"}, "246"},
 		{[]string{"--status", "In progress"}, "246"},
 		{[]string{"--status", "5"}, "247"},
 		{[]string{"--assignee", "me"}, "246"},

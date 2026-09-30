@@ -107,14 +107,15 @@ func (s *Service) Member(ctx context.Context, selector string) (Object, error) {
 
 // Epic resolves an epic of the project by ref only: a ref is never an id.
 func (s *Service) Epic(ctx context.Context, ref string) (Object, error) {
-	if _, err := positive(ref); err != nil {
+	n, err := positive(ref)
+	if err != nil {
 		return nil, Usage("epic reference must be a positive integer")
 	}
 	items, err := s.Catalog(ctx, "epics")
 	if err != nil {
 		return nil, err
 	}
-	return resolve(items, ref, "ref", false)
+	return resolve(items, strconv.FormatInt(n, 10), "ref", false)
 }
 
 // remoteFilters maps the list filters to the query parameters the probe proved Taiga honours.
@@ -155,7 +156,7 @@ func (s *Service) Stories(ctx context.Context, filters url.Values) ([]Object, er
 }
 
 func matches(o Object, filters url.Values) bool {
-	if v := filters.Get("ref"); v != "" && fmt.Sprint(o["ref"]) != v {
+	if v := filters.Get("ref"); v != "" && ID(o["ref"]) != ID(v) {
 		return false
 	}
 	if v := filters.Get("status"); v != "" && fmt.Sprint(o["status"]) != v {
