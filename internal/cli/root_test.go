@@ -9,11 +9,13 @@ import (
 func run(t *testing.T, env map[string]string, args ...string) (string, string, int) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	code := Main(args, strings.NewReader(""), &out, &errOut, func(k string) string { return env[k] })
+	code := Main(args, strings.NewReader(""), &out, &errOut, func(k string) string { return env[k] }, false)
 	return out.String(), errOut.String(), code
 }
 
 func TestVersionPrintsVersion(t *testing.T) {
+	oldVersion := Version
+	t.Cleanup(func() { Version = oldVersion })
 	Version = "1.2.3-test"
 	out, _, code := run(t, nil, "version")
 	if code != 0 {
@@ -28,5 +30,8 @@ func TestUnknownCommandIsUsageError(t *testing.T) {
 	_, errOut, code := run(t, nil, "nope")
 	if code != 2 {
 		t.Fatalf("exit = %d, stderr = %s", code, errOut)
+	}
+	if !strings.Contains(errOut, `"code": "usage"`) {
+		t.Fatalf("stderr = %s", errOut)
 	}
 }
