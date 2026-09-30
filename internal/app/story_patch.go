@@ -8,9 +8,14 @@ import (
 
 // Patch records which changes were asked for; absent fields stay untouched.
 type Patch struct {
-	Set                 Object
-	AddTags, RemoveTags []string
-	Append              *string
+	Set                           Object
+	AddTags, RemoveTags           []string
+	Append                        *string
+	AddAssignees, RemoveAssignees []int64
+	Owner                         *int64
+	ClearOwner                    bool
+	Block                         *string
+	Unblock                       bool
 }
 
 // Names normalizes Taiga tags ([name, color] pairs or plain names) to names.
@@ -102,6 +107,13 @@ func BuildPatch(before Object, p Patch) (Object, error) {
 		if !equal(old, next) {
 			out["tags"] = next
 		}
+	}
+	assignments, err := AssignmentPatch(before, p)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range assignments {
+		out[k] = v
 	}
 	return out, nil
 }

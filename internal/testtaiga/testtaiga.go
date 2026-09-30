@@ -17,6 +17,10 @@ const (
 	ServiceUser     = "svc"
 	ServicePassword = "svc12345"
 	ProjectSlug     = "cli-test"
+	// ServiceEmail is svc's address in scripts/taiga-seed. POST memberships only takes a
+	// username the requester already shares a project with ("The user must be a valid
+	// contact"); an email skips that check and still resolves to the existing user.
+	ServiceEmail = "svc@example.com"
 )
 
 // URL returns the base URL of the test Taiga (no /api/v1 suffix). It panics if the

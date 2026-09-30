@@ -38,12 +38,16 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 |---|---|
 | `taiga story list [--ref N] [--status S] [--assignee USER\|me] [--epic REF] [--tag T]... [--search TEXT] [--closed[=false]]` | Every matching story, without manual paging. Repeated `--tag` must all match |
 | `taiga story get REF` / `taiga story get --id ID` | One story, with its web `url` |
-| `taiga story create --subject S [--description-file F\|-] [--status S] [--tag T]... [--swimlane L]` | Create a story |
-| `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L]` | Send only the fields that change, with the story `version` |
+| `taiga story create --subject S [--description-file F\|-] [--status S] [--tag T]... [--swimlane L] [--assignee USER]...` | Create a story |
+| `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L] [--add-assignee USER]... [--remove-assignee USER]... [--owner-assignee USER\|--clear-owner-assignee] [--block NOTE\|--unblock]` | Send only the fields that change, with the story `version` |
 | `taiga story close REF [--status S]` | Move to a closed status; never archives or deletes |
 
 - Statuses, milestones and swimlanes take a name or an id of the project; users take an exact username, an id or `me`, and must be project members. A name used twice is `ambiguous_name`.
 - `--tag` replaces the tags; `--add-tag`/`--remove-tag` merge with the current ones. Taiga stores tags in lower case, so the CLI sends them that way.
+- `--add-assignee`/`--remove-assignee` merge with the current assignees (`assigned_users`) and never change the main assignee (`assigned_to`); that takes `--owner-assignee` or `--clear-owner-assignee`. Taiga always shows the main assignee among the assignees, so removing them needs one of those two flags in the same command. Changing the main assignee keeps the others.
+- `--remove-assignee` also takes users who left the project. A write that changes assignees is not retried after a version conflict (exit 4; run it again, or use `--force-version`).
+- Taiga's concurrency check does not cover the main assignee (`assigned_to`). The CLI re-reads the assignees right before writing (a change since the first read is `version_conflict`) and checks the story after writing; a mismatch is `assignees_postcondition_failed` (exit 4): the write **was applied**, so check the story instead of re-running. A concurrent change in the short window between that re-read and the write is detected, not prevented. See [docs/api-notes.md](docs/api-notes.md).
+- `--block NOTE` sets `is_blocked` with the note (required); `--unblock` clears both.
 - `close` without `--status` uses the project's only closed status; with several (the default template has `Done` and `Archived`) it asks for one.
 - Every write accepts `--dry-run` (prints method, path and body) and, except `create`, `--force-version`.
 - `--epic` on `create`/`update` answers `unsupported_operation`: Taiga links epics through a separate, unversioned resource whose replacement needs `DELETE` (see [docs/api-notes.md](docs/api-notes.md)).
@@ -52,6 +56,7 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 taiga story list --assignee me --closed=false
 taiga story update 246 --status "In progress" --add-tag cli --dry-run
 taiga story update 246 --description-file notes.md
+taiga story update 247 --add-assignee me --remove-assignee jdoe --block "waiting for the B6 review"
 ```
 
 ## Output and exit codes

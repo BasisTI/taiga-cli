@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -172,15 +173,59 @@ func (s *Service) Write(ctx context.Context, path string, before, patch Object, 
 		body["version"] = before["version"]
 		return WritePlan{true, "PATCH", path, body}, nil
 	}
-	raw, err := Snapshot(before)
+	resp, err := s.send(ctx, path, before, patch, force)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.API.WriteVersionedFrom(ctx, "PATCH", path, patch, raw, force)
+	return reread(ctx, s.API, "PATCH", path, path, resp)
+}
+
+// send writes patch with the version of before: once for opaque fields, else with the guarded retry.
+func (s *Service) send(ctx context.Context, path string, before, patch Object, force bool) (*taiga.Response, error) {
+	var resp *taiga.Response
+	var err error
+	if opaque(patch) && !force {
+		resp, err = s.writeOnce(ctx, path, before, patch)
+	} else {
+		var raw map[string]json.RawMessage
+		if raw, err = Snapshot(before); err != nil {
+			return nil, err
+		}
+		resp, err = s.API.WriteVersionedFrom(ctx, "PATCH", path, patch, raw, force)
+	}
 	if err != nil {
 		return nil, taiga.ToOutput(err)
 	}
-	return reread(ctx, s.API, "PATCH", path, path, resp)
+	return resp, nil
+}
+
+// opaqueKeys are fields whose answer does not show everything a write replaces: Taiga answers
+// assigned_users as the stored list plus assigned_to (docs/api-notes.md). Comparing them after a
+// version conflict can miss a concurrent change, so a patch with any of them is never retried.
+var opaqueKeys = []string{"assigned_users", "assigned_to"}
+
+func opaque(patch Object) bool {
+	for _, k := range opaqueKeys {
+		if _, ok := patch[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// writeOnce sends patch with the version of before and turns a version conflict into an error.
+func (s *Service) writeOnce(ctx context.Context, path string, before, patch Object) (*taiga.Response, error) {
+	body := map[string]any{}
+	for k, v := range patch {
+		body[k] = v
+	}
+	body["version"] = before["version"]
+	resp, err := s.API.Do(ctx, taiga.Request{Method: "PATCH", Path: path, Body: body})
+	var ae *taiga.APIError
+	if err != nil && errors.As(err, &ae) && ae.IsVersionConflict() {
+		return nil, &taiga.ConflictError{Method: "PATCH", Path: path, Fields: opaqueKeys}
+	}
+	return resp, err
 }
 
 // reread returns the resource after a write that Taiga confirmed with a 2xx status. If the GET

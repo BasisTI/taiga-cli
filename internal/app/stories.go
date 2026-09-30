@@ -75,9 +75,9 @@ func (s *Service) StoryView(o Object) (Object, error) {
 	return out, nil
 }
 
-// Member resolves a project member by exact username, id or "me". users?project= also lists
-// non-members (probe), so the id must appear in the project's memberships.
-func (s *Service) Member(ctx context.Context, selector string) (Object, error) {
+// User resolves a user by exact username, id or "me" in users?project=, which also lists
+// non-members (probe). Use it only where membership does not matter, like removing an assignee.
+func (s *Service) User(ctx context.Context, selector string) (Object, error) {
 	if selector == "me" {
 		me, err := Read(ctx, s.API, "users/me", nil)
 		if err != nil {
@@ -89,7 +89,13 @@ func (s *Service) Member(ctx context.Context, selector string) (Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	user, err := Resolve(users, selector, "username")
+	return Resolve(users, selector, "username")
+}
+
+// Member resolves a project member by exact username, id or "me": the id must appear in the
+// project's memberships.
+func (s *Service) Member(ctx context.Context, selector string) (Object, error) {
+	user, err := s.User(ctx, selector)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +250,11 @@ func (s *Service) updateFrom(ctx context.Context, before Object, p Patch, dry, f
 	if err != nil {
 		return nil, err
 	}
-	result, err := s.Write(ctx, fmt.Sprintf("userstories/%d", ID(before["id"])), before, patch, dry, force)
+	path := fmt.Sprintf("userstories/%d", ID(before["id"]))
+	if opaque(patch) && !dry {
+		return s.writeAssignees(ctx, path, before, p, patch, force)
+	}
+	result, err := s.Write(ctx, path, before, patch, dry, force)
 	if err != nil {
 		return nil, err
 	}
@@ -294,4 +304,58 @@ func (s *Service) CloseStory(ctx context.Context, ref, selector string, dry, for
 		chosen = closed[0]
 	}
 	return s.updateFrom(ctx, before, Patch{Set: Object{"status": chosen["id"]}}, dry, force)
+}
+
+// writeAssignees writes a patch that changes the assignees. Taiga's OCC never sees assigned_to
+// (docs/api-notes.md), so the write is fenced on both sides: the assignees are re-read right
+// before the PATCH, and any change since the first read is a conflict; after the PATCH, the
+// story is checked against the request, and the PATCH answer must be the next version of that
+// re-read. A mismatch means the write landed next to someone else's: it is reported, never retried.
+// --force-version skips both checks.
+func (s *Service) writeAssignees(ctx context.Context, path string, before Object, p Patch, patch Object, force bool) (any, error) {
+	base := before
+	if !force {
+		current, err := Read(ctx, s.API, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		if !sameAssignees(before, current) {
+			return nil, taiga.ToOutput(&taiga.ConflictError{Method: "PATCH", Path: path, Fields: opaqueKeys})
+		}
+		base = current
+	}
+	resp, err := s.send(ctx, path, before, patch, force)
+	if err != nil {
+		return nil, err
+	}
+	after, err := reread(ctx, s.API, "PATCH", path, path, resp)
+	if err != nil {
+		return nil, err
+	}
+	if !force {
+		problems := assigneeProblems(base, after, p)
+		// The PATCH answer shows the version our write produced. When it cannot be read, the
+		// re-read after the write stands in: it can only be larger, so the check stays sound
+		// (at worst a write that landed after ours is reported too). It is never skipped.
+		version, source := after["version"], "the re-read after it has"
+		if written, err := Decode(resp.Body); err == nil {
+			version, source = written["version"], "it answered"
+		}
+		if ID(version) != ID(base["version"])+1 {
+			problems = append(problems, fmt.Sprintf("another write landed next to this PATCH (the read before it had version %v, %s version %v)", base["version"], source, version))
+		}
+		if len(problems) > 0 {
+			return nil, assigneesMismatch(path, resp.Status, after, problems)
+		}
+	}
+	return s.StoryView(after)
+}
+
+func assigneesMismatch(path string, status int, after Object, problems []string) error {
+	users, _ := assignees(after["assigned_users"])
+	cause := fmt.Sprintf("the change was applied (PATCH %s returned HTTP %d), but the story does not match the request: %s; found assigned_to=%s assigned_users=%v (version %v)",
+		path, status, strings.Join(problems, "; "), ownerName(ID(after["assigned_to"])), users, after["version"])
+	return &output.Error{Code: "assignees_postcondition_failed", Source: "api", Stage: "PATCH " + path, Cause: cause,
+		Recovery: "do not re-run the command blindly: someone else changed the assignees at the same time, which Taiga cannot detect for assigned_to; check the story with `taiga story get` and fix what is needed",
+		Exit:     output.ExitConflict}
 }
