@@ -164,3 +164,30 @@ func isCode(err error, code string) bool {
 	var oe *output.Error
 	return errors.As(err, &oe) && oe.Code == code
 }
+
+func TestNormalizeURLNeverEchoesUserinfoQueryOrFragment(t *testing.T) {
+	cases := map[string]string{
+		"https://tok3n@h":             "tok3n",
+		"https://u:s3cret@h":          "s3cret",
+		"https://h/?token=abc":        "abc",
+		"https://h#sec":               "sec",
+		"https://h/%zz?token=abc":     "abc",
+		"http://agile.example/?q=abc": "abc",
+	}
+	for in, secret := range cases {
+		_, err := NormalizeURL(in)
+		var oe *output.Error
+		if !errors.As(err, &oe) {
+			t.Fatalf("%q: want output.Error, got %v", in, err)
+		}
+		for _, s := range []string{err.Error(), oe.Code, oe.Source, oe.Stage, oe.Cause, oe.Recovery} {
+			if strings.Contains(s, secret) {
+				t.Errorf("%q: %q leaked in %q", in, secret, s)
+			}
+		}
+	}
+	_, err := NormalizeURL("http://agile.example/x")
+	if err == nil || !strings.Contains(err.Error(), `"http://agile.example/x"`) {
+		t.Fatalf("safe parts of the URL should still be shown: %v", err)
+	}
+}

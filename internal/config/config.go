@@ -154,7 +154,7 @@ func NormalizeURL(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	u, err := url.Parse(trimmed)
 	fail := func(cause string) (string, error) {
-		return "", &output.Error{Code: "config_invalid_url", Source: "config", Cause: urlForError(trimmed, u, err) + cause, Recovery: "use https://host (http only for localhost)", Exit: output.ExitUsage}
+		return "", &output.Error{Code: "config_invalid_url", Source: "config", Cause: urlForError(u, err) + cause, Recovery: "use https://host (http only for localhost)", Exit: output.ExitUsage}
 	}
 	if err != nil || u.Host == "" {
 		return fail("not an absolute URL")
@@ -174,13 +174,12 @@ func NormalizeURL(raw string) (string, error) {
 	return u.Scheme + "://" + strings.ToLower(u.Host), nil
 }
 
-// urlForError renders the URL for an error cause without ever echoing userinfo.
-func urlForError(raw string, u *url.URL, parseErr error) string {
-	if !strings.Contains(raw, "@") {
-		return fmt.Sprintf("%q: ", raw)
+// urlForError renders only scheme://host[:port][path] for an error cause: userinfo, query and
+// fragment may carry secrets and are never echoed. Input that does not parse with a host is omitted.
+func urlForError(u *url.URL, parseErr error) string {
+	if parseErr != nil || u.Host == "" {
+		return ""
 	}
-	if parseErr == nil && u.User != nil && u.Opaque == "" {
-		return fmt.Sprintf("%q: ", u.Redacted())
-	}
-	return ""
+	safe := url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}
+	return fmt.Sprintf("%q: ", safe.String())
 }
