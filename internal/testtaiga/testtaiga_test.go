@@ -19,6 +19,9 @@ func TestCheckLocal(t *testing.T) {
 		{"http://user@agile.basis.com.br", false, true},
 		{"https://agile.basis.com.br", true, false},
 		{"", false, true},
+		{"http://localhost@evil.com", false, true},
+		{"http://[2001:db8::1]:8000", false, true},
+		{"http://LOCALHOST:8000", false, false},
 	}
 	for _, tt := range tests {
 		err := checkLocal(tt.url, tt.allow)

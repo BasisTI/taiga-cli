@@ -8,7 +8,9 @@ host="${URL#*://}"; host="${host%%/*}"; host="${host##*@}"
 if [[ "$host" == \[* ]]; then host="${host%%]*}]"; else host="${host%%:*}"; fi
 remote=1
 case "$host" in
+  '') ;; # empty host
   localhost|127.0.0.1|'[::1]') remote=0 ;;
+  \[*) ;; # any other IPv6 literal
   *.*) ;;
   *) remote=0 ;; # single-label host: compose service name
 esac
