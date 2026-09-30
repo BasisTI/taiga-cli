@@ -17,7 +17,8 @@ jobs:
       - run: go test -race ./...
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.14.0
+          install-mode: goinstall
   integration:
     runs-on: ubuntu-latest
     steps:
