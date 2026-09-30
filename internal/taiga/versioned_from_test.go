@@ -148,3 +148,47 @@ func TestWriteVersionedFromDoesNotRepeatPatchOnServerError(t *testing.T) {
 		t.Fatalf("writes=%d err=%v", writes, err)
 	}
 }
+
+// 412 Precondition Failed with a version key is a version conflict too: re-read, then retry
+// only when the patched fields did not change (exit 4 otherwise).
+func TestWriteVersionedFromTreats412AsVersionConflict(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		reread     string
+		wantErr    bool
+		wantWrites int
+	}{
+		{"unchanged field retries", `{"version":4,"status":1}`, false, 2},
+		{"changed field conflicts", `{"version":4,"status":9}`, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writes := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "GET" {
+					_, _ = fmt.Fprint(w, tc.reread)
+					return
+				}
+				writes++
+				if writes == 1 {
+					w.WriteHeader(412)
+					_, _ = fmt.Fprint(w, `{"version":"The version does not match"}`)
+					return
+				}
+				_, _ = fmt.Fprint(w, `{"version":5}`)
+			}))
+			defer srv.Close()
+			c := New(srv.URL, StaticToken{}, WithRetryWait(0))
+			_, err := c.WriteVersionedFrom(context.Background(), "PATCH", "userstories/1", map[string]any{"status": 2},
+				map[string]json.RawMessage{"version": json.RawMessage(`3`), "status": json.RawMessage(`1`)}, false)
+			if (err != nil) != tc.wantErr || writes != tc.wantWrites {
+				t.Fatalf("writes=%d err=%v", writes, err)
+			}
+			if tc.wantErr && ToOutput(err).Exit != 4 {
+				t.Fatalf("exit %d", ToOutput(err).Exit)
+			}
+		})
+	}
+	if ToOutput(&APIError{Status: 412, Method: "PATCH", Path: "x", Body: []byte(`{"version":"x"}`)}).Code != "version_conflict" {
+		t.Fatal("412 not mapped to version_conflict")
+	}
+}

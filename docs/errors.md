@@ -54,7 +54,7 @@ Todo erro sai no stderr como `{"error":{"code","source","stage","cause","recover
 | `secret_ambiguous` | 3 | `keyring` | mais de uma credencial para a mesma referência | apagar as duplicadas com `secret-tool clear service taiga-cli` |
 | `ambiguous_name` | 2 | — | nome de status, milestone, swimlane ou usuário repetido no projeto; `story close` sem `--status` num projeto com mais de um status fechado | usar o id, ou escolher com `--status` |
 | `unsupported_operation` | 2 | — | a flag depende de um contrato do Taiga que a CLI não cumpre com segurança; hoje, `--epic` em `story create`/`update` (vínculo sem `version`, troca exige `DELETE`); nada é enviado | vincular pela interface web ou por `taiga api POST epics/<id>/related_userstories` |
-| `version_conflict` | 4 | `api` | `PATCH`/`PUT` com `version` desatualizado ou ausente; com `--auto-version`, conflito em campo alterado por outra pessoa | reler e repetir; `--auto-version` ou `--force-version` |
+| `version_conflict` | 4 | `api` | `PATCH`/`PUT` com `version` desatualizado ou ausente (400 com chave `version`, 409 ou 412); com `--auto-version`, conflito em campo alterado por outra pessoa | reler e repetir; `--auto-version` ou `--force-version` |
 | `not_found` | 5 | `api` ou — | a API respondeu 404; ou nome, ref de épico ou usuário inexistente no projeto (usuário fora de `memberships` também) | conferir o caminho, a ref ou o nome |
 | `forbidden` | 6 | `api` | a API respondeu 403 | a conta não tem permissão |
 | `network_error` | 7 | `network` | falha de rede, DNS, TLS ou timeout de 30 s | conferir a conectividade (agentes em sandbox precisam de rede) |
