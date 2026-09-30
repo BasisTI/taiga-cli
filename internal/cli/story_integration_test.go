@@ -236,11 +236,26 @@ func TestIntegrationStoryAssigneesAndBlock(t *testing.T) {
 // the exit code, how many PATCHes the CLI sent, and its stderr.
 func raceUpdate(t *testing.T, env map[string]string, story map[string]any, concurrent []string, args ...string) (int, int, string) {
 	t.Helper()
+	return raceUpdateAnswer(t, env, story, concurrent, false, args...)
+}
+
+// raceUpdateAnswer is raceUpdate; with garble, the body of the CLI's successful PATCH answer is
+// replaced by HTML (a proxy page), leaving the status as it was.
+func raceUpdateAnswer(t *testing.T, env map[string]string, story map[string]any, concurrent []string, garble bool, args ...string) (int, int, string) {
+	t.Helper()
 	target, err := url.Parse(env["TAIGA_URL"])
 	if err != nil {
 		t.Fatal(err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ModifyResponse = func(r *http.Response) error {
+		if garble && r.Request.Method == "PATCH" && r.StatusCode == 200 {
+			r.Body = io.NopCloser(strings.NewReader("<html>proxy</html>"))
+			r.ContentLength = -1
+			r.Header.Del("Content-Length")
+		}
+		return nil
+	}
 	patches := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "PATCH" {
@@ -311,5 +326,16 @@ func TestIntegrationStoryAssigneeRaces(t *testing.T) {
 		if code != 4 || patches != 1 || !strings.Contains(errOut, "assignees_postcondition_failed") || !strings.Contains(errOut, "do not re-run") {
 			t.Errorf("%s: exit %d, %d PATCH: %s", tc.name, code, patches, errOut)
 		}
+	}
+}
+
+// With the PATCH answer unreadable, the version check falls back to the re-read after the write.
+func TestIntegrationStoryAssigneeRaceUnreadableAnswer(t *testing.T) {
+	env, admin, svc := assignProject(t)
+	pid := storyJSON(t, env, "", "api", "GET", "projects/by_slug", "--query", "slug="+env["TAIGA_PROJECT"])["id"]
+	s := storyJSON(t, env, "", "api", "POST", "userstories", "-F", fmt.Sprintf("project=%v", pid), "-f", "subject=owner race, unreadable answer", "-F", "assigned_users=["+admin+"]")
+	code, patches, errOut := raceUpdateAnswer(t, env, s, []string{"-F", "assigned_to=" + svc}, true, "--owner-assignee", testtaiga.AdminUser)
+	if code != 4 || patches != 1 || !strings.Contains(errOut, "assignees_postcondition_failed") {
+		t.Fatalf("exit %d, %d PATCH: %s", code, patches, errOut)
 	}
 }

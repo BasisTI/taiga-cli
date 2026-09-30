@@ -267,3 +267,19 @@ func TestStoryAssigneePostconditionDetectsConcurrentWrite(t *testing.T) {
 		t.Fatalf("force: %d %s", code, stderr)
 	}
 }
+
+// An unreadable PATCH answer must not switch the version check off: the re-read after the write
+// stands in for it, and must be exactly the next version of the re-read before the PATCH.
+func TestStoryAssigneePostconditionWithUnreadableAnswer(t *testing.T) {
+	f, calls := newStoryFake(t)
+	f.acceptStale, f.badWrite = true, true
+	f.onPatch = func(s map[string]any) { s["version"] = s["version"].(int) + 1; f.onPatch = nil }
+	_, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--add-assignee", "svc")
+	if code != 4 || !strings.Contains(stderr, `"code": "assignees_postcondition_failed"`) || !strings.Contains(stderr, "re-read") || len(writes(calls)) != 1 {
+		t.Fatalf("%d %s", code, stderr)
+	}
+	// Without a concurrent write, the re-read is the next version and the command succeeds.
+	if _, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--remove-assignee", "svc"); code != 0 {
+		t.Fatalf("no race: %d %s", code, stderr)
+	}
+}

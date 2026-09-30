@@ -334,8 +334,15 @@ func (s *Service) writeAssignees(ctx context.Context, path string, before Object
 	}
 	if !force {
 		problems := assigneeProblems(base, after, p)
-		if written, err := Decode(resp.Body); err == nil && ID(written["version"]) != ID(base["version"])+1 {
-			problems = append(problems, fmt.Sprintf("another write landed between the read (version %v) and this PATCH (answered version %v)", base["version"], written["version"]))
+		// The PATCH answer shows the version our write produced. When it cannot be read, the
+		// re-read after the write stands in: it can only be larger, so the check stays sound
+		// (at worst a write that landed after ours is reported too). It is never skipped.
+		version, source := after["version"], "the re-read after it has"
+		if written, err := Decode(resp.Body); err == nil {
+			version, source = written["version"], "it answered"
+		}
+		if ID(version) != ID(base["version"])+1 {
+			problems = append(problems, fmt.Sprintf("another write landed next to this PATCH (the read before it had version %v, %s version %v)", base["version"], source, version))
 		}
 		if len(problems) > 0 {
 			return nil, assigneesMismatch(path, resp.Status, after, problems)
