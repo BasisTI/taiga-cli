@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -157,5 +158,35 @@ func TestBuildPatchMergesAssignmentsFromTheSameRead(t *testing.T) {
 	want := Object{"subject": "b", "tags": []string{"x", "y"}, "assigned_users": []int64{5, 6}, "is_blocked": true, "blocked_note": "b"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%v", got)
+	}
+}
+
+func TestAssigneeProblems(t *testing.T) {
+	n := func(xs ...int) []any {
+		out := []any{}
+		for _, x := range xs {
+			out = append(out, json.Number(fmt.Sprint(x)))
+		}
+		return out
+	}
+	base := Object{"assigned_to": json.Number("5"), "assigned_users": n(5, 6)}
+	for _, tc := range []struct {
+		name  string
+		after Object
+		p     Patch
+		want  string // substring of the problems, "" for none
+	}{
+		{"ok add", Object{"assigned_to": json.Number("5"), "assigned_users": n(5, 6, 7)}, Patch{AddAssignees: []int64{7}}, ""},
+		{"add missing", Object{"assigned_to": json.Number("5"), "assigned_users": n(5, 6)}, Patch{AddAssignees: []int64{7}}, "7 was not added"},
+		{"remove kept", Object{"assigned_to": json.Number("6"), "assigned_users": n(5, 6)}, Patch{RemoveAssignees: []int64{6}}, "6 was not removed"},
+		{"owner", Object{"assigned_to": json.Number("9"), "assigned_users": n(5, 6, 9)}, Patch{Owner: ptr(int64(6))}, "main assignee is 9, not 6"},
+		{"clear", Object{"assigned_to": json.Number("9"), "assigned_users": n(5, 6, 9)}, Patch{ClearOwner: true}, "main assignee is 9, not none"},
+		{"owner kept", Object{"assigned_to": nil, "assigned_users": n(5, 6, 7)}, Patch{AddAssignees: []int64{7}}, "main assignee is none, not 5"},
+		{"vanished", Object{"assigned_to": json.Number("5"), "assigned_users": n(5, 7)}, Patch{AddAssignees: []int64{7}}, "6 disappeared"},
+	} {
+		got := strings.Join(assigneeProblems(base, tc.after, tc.p), "; ")
+		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
+			t.Errorf("%s: %q", tc.name, got)
+		}
 	}
 }

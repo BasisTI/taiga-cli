@@ -173,6 +173,15 @@ func (s *Service) Write(ctx context.Context, path string, before, patch Object, 
 		body["version"] = before["version"]
 		return WritePlan{true, "PATCH", path, body}, nil
 	}
+	resp, err := s.send(ctx, path, before, patch, force)
+	if err != nil {
+		return nil, err
+	}
+	return reread(ctx, s.API, "PATCH", path, path, resp)
+}
+
+// send writes patch with the version of before: once for opaque fields, else with the guarded retry.
+func (s *Service) send(ctx context.Context, path string, before, patch Object, force bool) (*taiga.Response, error) {
 	var resp *taiga.Response
 	var err error
 	if opaque(patch) && !force {
@@ -187,7 +196,7 @@ func (s *Service) Write(ctx context.Context, path string, before, patch Object, 
 	if err != nil {
 		return nil, taiga.ToOutput(err)
 	}
-	return reread(ctx, s.API, "PATCH", path, path, resp)
+	return resp, nil
 }
 
 // opaqueKeys are fields whose answer does not show everything a write replaces: Taiga answers

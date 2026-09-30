@@ -129,3 +129,72 @@ func AssignmentPatch(before Object, p Patch) (Object, error) {
 	}
 	return out, nil
 }
+
+func ownerName(id int64) string {
+	if id <= 0 {
+		return "none"
+	}
+	return fmt.Sprint(id)
+}
+
+// assigneeProblems compares the story after an assignee write with the request: every added id
+// is there, every removed id is gone, the main assignee is the one asked for (or unchanged), and
+// nobody in base (the state read right before the PATCH) disappeared without being removed.
+func assigneeProblems(base, after Object, p Patch) []string {
+	problems := []string{}
+	was, errBase := assignees(base["assigned_users"])
+	now, errAfter := assignees(after["assigned_users"])
+	if errBase != nil || errAfter != nil {
+		return []string{"assigned_users could not be read"}
+	}
+	has := map[int64]bool{}
+	for _, id := range now {
+		has[id] = true
+	}
+	removed := map[int64]bool{}
+	for _, id := range p.RemoveAssignees {
+		removed[id] = true
+		if has[id] {
+			problems = append(problems, fmt.Sprintf("assignee %d was not removed", id))
+		}
+	}
+	for _, id := range p.AddAssignees {
+		if !has[id] {
+			problems = append(problems, fmt.Sprintf("assignee %d was not added", id))
+		}
+	}
+	for _, id := range was {
+		if !has[id] && !removed[id] {
+			problems = append(problems, fmt.Sprintf("assignee %d disappeared without being removed", id))
+		}
+	}
+	want := ID(base["assigned_to"])
+	if p.Owner != nil {
+		want = *p.Owner
+	}
+	if p.ClearOwner {
+		want = 0
+	}
+	if got := ID(after["assigned_to"]); got != want {
+		problems = append(problems, fmt.Sprintf("the main assignee is %s, not %s", ownerName(got), ownerName(want)))
+	}
+	return problems
+}
+
+func sameAssignees(a, b Object) bool {
+	x, errA := assignees(a["assigned_users"])
+	y, errB := assignees(b["assigned_users"])
+	if errA != nil || errB != nil || ID(a["assigned_to"]) != ID(b["assigned_to"]) || len(x) != len(y) {
+		return false
+	}
+	in := map[int64]bool{}
+	for _, id := range x {
+		in[id] = true
+	}
+	for _, id := range y {
+		if !in[id] {
+			return false
+		}
+	}
+	return true
+}

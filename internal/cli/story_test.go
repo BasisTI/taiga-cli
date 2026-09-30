@@ -111,6 +111,11 @@ type storyFake struct {
 	onPatch  func(map[string]any)
 	// badWrite makes a successful PATCH/POST answer with a body that is not JSON.
 	badWrite bool
+	// onRead runs on each GET userstories/<id>, before the answer.
+	onRead func(map[string]any)
+	// acceptStale accepts a PATCH with an old version, as Taiga does when the fields sent did not
+	// change since (per-field OCC, docs/api-notes.md).
+	acceptStale bool
 }
 
 func newStoryFake(t *testing.T) (*storyFake, *[]recorded) {
@@ -232,6 +237,9 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && strings.HasPrefix(path, "userstories/"):
 		id, _ := strconv.ParseInt(strings.TrimPrefix(path, "userstories/"), 10, 64)
 		if s, ok := f.stories[id]; ok {
+			if f.onRead != nil {
+				f.onRead(s)
+			}
 			f.write(w, s)
 			return
 		}
@@ -244,7 +252,7 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if fmt.Sprint(body["version"]) != fmt.Sprint(s["version"]) {
+		if !f.acceptStale && fmt.Sprint(body["version"]) != fmt.Sprint(s["version"]) {
 			w.WriteHeader(400)
 			_, _ = fmt.Fprint(w, `{"version":"The version doesn't match with the current one"}`)
 			return

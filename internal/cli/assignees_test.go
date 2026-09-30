@@ -223,3 +223,47 @@ func TestStoryFalseBooleanFlagsDoNotConflict(t *testing.T) {
 		t.Fatalf("%d %s %+v", code, stderr, w)
 	}
 }
+
+// The assignees are re-read right before the PATCH; a change since the first read is a conflict,
+// not a recalculation, because the rest of the patch was computed from the first read too.
+func TestStoryAssigneePreReadConflict(t *testing.T) {
+	f, calls := newStoryFake(t)
+	f.onRead = func(s map[string]any) {
+		s["assigned_users"] = []any{5, 9}
+		s["version"] = s["version"].(int) + 1
+		f.onRead = nil
+	}
+	_, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--add-assignee", "svc", "--add-tag", "x")
+	if code != 4 || !strings.Contains(stderr, "version_conflict") || len(writes(calls)) != 0 {
+		t.Fatalf("%d %s %+v", code, stderr, writes(calls))
+	}
+	// A change elsewhere does not matter: the assignees are the same.
+	f.onRead = func(s map[string]any) { s["subject"] = "outro"; s["version"] = s["version"].(int) + 1; f.onRead = nil }
+	f.acceptStale = true
+	_, stderr, code = runIn(t, f.env(), "", "story", "update", "246", "--add-assignee", "svc")
+	if code != 0 || len(writes(calls)) != 1 {
+		t.Fatalf("unrelated change: %d %s", code, stderr)
+	}
+}
+
+// Taiga cannot refuse a concurrent assigned_to change, so a write that landed after someone
+// else's (the PATCH answer skips a version) fails as applied-but-unverified.
+func TestStoryAssigneePostconditionDetectsConcurrentWrite(t *testing.T) {
+	f, calls := newStoryFake(t)
+	f.acceptStale = true
+	f.onPatch = func(s map[string]any) {
+		s["assigned_to"] = 9
+		s["version"] = s["version"].(int) + 1
+		f.onPatch = nil
+	}
+	out, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--add-assignee", "svc")
+	if code != 4 || out != "" || !strings.Contains(stderr, `"code": "assignees_postcondition_failed"`) || !strings.Contains(stderr, "was applied") ||
+		!strings.Contains(stderr, "do not re-run") || !strings.Contains(stderr, "assigned_to=9") || len(writes(calls)) != 1 {
+		t.Fatalf("%d %q %s", code, out, stderr)
+	}
+	// --force-version skips the checks: the user asked to override concurrent changes.
+	f.onPatch = func(s map[string]any) { s["version"] = s["version"].(int) + 1; f.onPatch = nil }
+	if _, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--remove-assignee", "svc", "--force-version"); code != 0 {
+		t.Fatalf("force: %d %s", code, stderr)
+	}
+}

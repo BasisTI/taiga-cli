@@ -232,9 +232,9 @@ func TestIntegrationStoryAssigneesAndBlock(t *testing.T) {
 }
 
 // raceUpdate runs `story update` through a proxy that lets concurrent (a `taiga api PATCH` body,
-// with the version read before) land between the CLI's read and its first PATCH. It returns
-// the exit code and how many PATCHes the CLI sent.
-func raceUpdate(t *testing.T, env map[string]string, story map[string]any, concurrent []string, args ...string) (int, int) {
+// with the version read before) land between the CLI's reads and its first PATCH. It returns
+// the exit code, how many PATCHes the CLI sent, and its stderr.
+func raceUpdate(t *testing.T, env map[string]string, story map[string]any, concurrent []string, args ...string) (int, int, string) {
 	t.Helper()
 	target, err := url.Parse(env["TAIGA_URL"])
 	if err != nil {
@@ -260,10 +260,7 @@ func raceUpdate(t *testing.T, env map[string]string, story map[string]any, concu
 	}
 	race["TAIGA_URL"] = srv.URL
 	_, errOut, code := runIn(t, race, "", append([]string{"story", "update", fmt.Sprint(story["ref"])}, args...)...)
-	if code == 4 && !strings.Contains(errOut, "version_conflict") {
-		t.Errorf("exit 4 without version_conflict: %s", errOut)
-	}
-	return code, patches
+	return code, patches, errOut
 }
 
 // Taiga accepts a stale version when the PATCH sends none of the fields changed since; the CLI
@@ -282,10 +279,37 @@ func TestIntegrationStoryBlockRaces(t *testing.T) {
 		{"block does not succeed after a concurrent unblock", []string{"--block", "minha nota"}, []string{"-F", "is_blocked=false"}, false, ""},
 	} {
 		s := storyJSON(t, env, "", "api", "POST", "userstories", "-F", fmt.Sprintf("project=%v", pid), "-f", "subject=block race", "-F", "is_blocked=true")
-		code, patches := raceUpdate(t, env, s, tc.concurrent, tc.args...)
+		code, patches, errOut := raceUpdate(t, env, s, tc.concurrent, tc.args...)
+		if !strings.Contains(errOut, "version_conflict") {
+			t.Errorf("%s: %s", tc.name, errOut)
+		}
 		got := storyJSON(t, env, "", "story", "get", fmt.Sprint(s["ref"]))
 		if code != 4 || patches != 1 || got["is_blocked"] != tc.blocked || got["blocked_note"] != tc.note {
 			t.Errorf("%s: exit %d, %d PATCH, is_blocked=%v note=%q", tc.name, code, patches, got["is_blocked"], got["blocked_note"])
+		}
+	}
+}
+
+// Taiga's OCC never sees assigned_to (it is not in the story history), so a concurrent owner
+// change cannot be refused by the server. The CLI checks the result after the write and fails
+// with assignees_postcondition_failed instead of reporting success.
+func TestIntegrationStoryAssigneeRaces(t *testing.T) {
+	env, admin, svc := assignProject(t)
+	pid := storyJSON(t, env, "", "api", "GET", "projects/by_slug", "--query", "slug="+env["TAIGA_PROJECT"])["id"]
+	for _, tc := range []struct {
+		name    string
+		initial []string
+		args    []string
+		owner   string // made the main assignee by someone else just before the CLI's PATCH
+	}{
+		{"removed user becomes owner", []string{"-F", "assigned_users=[" + svc + "]"}, []string{"--remove-assignee", testtaiga.ServiceUser}, svc},
+		{"owner change drops a concurrent owner", []string{"-F", "assigned_users=[" + admin + "]"}, []string{"--owner-assignee", testtaiga.AdminUser}, svc},
+		{"clear drops a concurrent owner", []string{"-F", "assigned_to=" + svc, "-F", "assigned_users=[" + svc + "]"}, []string{"--clear-owner-assignee"}, admin},
+	} {
+		s := storyJSON(t, env, "", append([]string{"api", "POST", "userstories", "-F", fmt.Sprintf("project=%v", pid), "-f", "subject=owner race"}, tc.initial...)...)
+		code, patches, errOut := raceUpdate(t, env, s, []string{"-F", "assigned_to=" + tc.owner}, tc.args...)
+		if code != 4 || patches != 1 || !strings.Contains(errOut, "assignees_postcondition_failed") || !strings.Contains(errOut, "do not re-run") {
+			t.Errorf("%s: exit %d, %d PATCH: %s", tc.name, code, patches, errOut)
 		}
 	}
 }
