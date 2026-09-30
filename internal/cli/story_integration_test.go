@@ -5,6 +5,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -131,5 +132,95 @@ func TestIntegrationStoryGetWithSession(t *testing.T) {
 	}
 	if _, errOut, code := runIn(t, env, "", "story", "get", ref); code != 3 {
 		t.Fatalf("without session exit %d: %s", code, errOut)
+	}
+}
+
+func apiList(t *testing.T, env map[string]string, args ...string) []map[string]any {
+	t.Helper()
+	out, errOut, code := runIn(t, env, "", append([]string{"api", "GET"}, args...)...)
+	if code != 0 {
+		t.Fatalf("%v: exit %d %s", args, code, errOut)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(out), &items); err != nil {
+		t.Fatal(err)
+	}
+	return items
+}
+
+// assignProject returns env for a disposable project where admin and svc are both members
+// (cli-test keeps svc out on purpose), creating the project and the membership when absent.
+func assignProject(t *testing.T) (map[string]string, string, string) {
+	token, _ := testtaiga.Login(t, testtaiga.AdminUser, testtaiga.AdminPassword)
+	const slug = "cli-test-probe-assign"
+	env := map[string]string{"TAIGA_URL": testtaiga.URL(), "TAIGA_TOKEN": token, "TAIGA_PROJECT": slug}
+	if _, _, code := runIn(t, env, "", "api", "GET", "projects/by_slug", "--query", "slug="+slug); code == 5 {
+		storyJSON(t, env, "", "api", "POST", "projects", "-f", "name="+slug, "-f", "description=taiga-cli probe")
+	}
+	project := storyJSON(t, env, "", "api", "GET", "projects/by_slug", "--query", "slug="+slug)
+	pid := fmt.Sprint(project["id"])
+	users := map[string]string{}
+	for _, u := range apiList(t, env, "users", "--query", "project="+pid) {
+		users[fmt.Sprint(u["username"])] = fmt.Sprint(u["id"])
+	}
+	member := false
+	for _, m := range apiList(t, env, "memberships", "--query", "project="+pid) {
+		member = member || fmt.Sprint(m["user"]) == users[testtaiga.ServiceUser]
+	}
+	if !member {
+		role := project["roles"].([]any)[0].(map[string]any)["id"]
+		storyJSON(t, env, "", "api", "POST", "memberships", "-F", "project="+pid, "-F", fmt.Sprintf("role=%v", role), "-f", "username="+testtaiga.ServiceUser)
+	}
+	return env, users[testtaiga.AdminUser], users[testtaiga.ServiceUser]
+}
+
+func TestIntegrationStoryAssigneesAndBlock(t *testing.T) {
+	env, admin, svc := assignProject(t)
+	users := func(o map[string]any) string {
+		ids := []string{}
+		for _, x := range o["assigned_users"].([]any) {
+			ids = append(ids, fmt.Sprint(x))
+		}
+		sort.Strings(ids)
+		return strings.Join(ids, ",")
+	}
+	both := strings.Join(func() []string { x := []string{admin, svc}; sort.Strings(x); return x }(), ",")
+
+	created := storyJSON(t, env, "", "story", "create", "--subject", "assignees "+fmt.Sprint(time.Now().UnixNano()), "--assignee", "me")
+	ref := fmt.Sprint(created["ref"])
+	if users(created) != admin || created["assigned_to"] != nil {
+		t.Fatalf("create: %v %v", created["assigned_users"], created["assigned_to"])
+	}
+	update := []string{"story", "update", ref, "--add-assignee", testtaiga.ServiceUser, "--owner-assignee", "me", "--block", "aguardando \"B6\"\nção"}
+	plan := storyJSON(t, env, "", append(update, "--dry-run")...)
+	if plan["dry_run"] != true || storyJSON(t, env, "", "story", "get", ref)["version"] != created["version"] {
+		t.Fatalf("dry-run changed the story: %v", plan)
+	}
+	s := storyJSON(t, env, "", update...)
+	if users(s) != both || fmt.Sprint(s["assigned_to"]) != admin || s["is_blocked"] != true || s["blocked_note"] != "aguardando \"B6\"\nção" {
+		t.Fatalf("update: %v", s)
+	}
+	// The owner cannot leave the list alone: Taiga would keep showing them.
+	if _, errOut, code := runIn(t, env, "", "story", "update", ref, "--remove-assignee", "me"); code != 2 || !strings.Contains(errOut, "main assignee") {
+		t.Fatalf("remove owner: %d %s", code, errOut)
+	}
+	s = storyJSON(t, env, "", "story", "update", ref, "--remove-assignee", testtaiga.ServiceUser)
+	if users(s) != admin || fmt.Sprint(s["assigned_to"]) != admin {
+		t.Fatalf("remove svc: %v", s)
+	}
+	s = storyJSON(t, env, "", "story", "update", ref, "--remove-assignee", "me", "--clear-owner-assignee", "--unblock")
+	if users(s) != "" || s["assigned_to"] != nil || s["is_blocked"] != false || s["blocked_note"] != "" {
+		t.Fatalf("clear: %v", s)
+	}
+	again := storyJSON(t, env, "", "story", "update", ref, "--unblock", "--remove-assignee", testtaiga.ServiceUser)
+	if again["version"] != s["version"] {
+		t.Fatal("no-op wrote")
+	}
+
+	// An owner set only through assigned_to (never stored in the list) survives an owner change.
+	raw := storyJSON(t, env, "", "api", "POST", "userstories", "-F", "project="+fmt.Sprint(created["project"]), "-f", "subject=implicit owner", "-F", "assigned_to="+admin)
+	s = storyJSON(t, env, "", "story", "update", fmt.Sprint(raw["ref"]), "--owner-assignee", testtaiga.ServiceUser)
+	if users(s) != both || fmt.Sprint(s["assigned_to"]) != svc {
+		t.Fatalf("owner change dropped the previous owner: %v %v", s["assigned_users"], s["assigned_to"])
 	}
 }
