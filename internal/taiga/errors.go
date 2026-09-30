@@ -44,6 +44,16 @@ type NetworkError struct {
 func (e *NetworkError) Error() string { return fmt.Sprintf("%s %s: %v", e.Method, e.Path, e.Err) }
 func (e *NetworkError) Unwrap() error { return e.Err }
 
+// ConflictError means another writer changed the fields we are updating.
+type ConflictError struct {
+	Method, Path string
+	Fields       []string
+}
+
+func (e *ConflictError) Error() string {
+	return fmt.Sprintf("%s %s: version conflict on %v", e.Method, e.Path, e.Fields)
+}
+
 func truncate(b []byte) string {
 	if len(b) > 2000 {
 		return string(b[:2000]) + "…"
@@ -60,6 +70,14 @@ func ToOutput(err error) *output.Error {
 	var ne *NetworkError
 	if errors.As(err, &ne) {
 		return &output.Error{Code: "network_error", Source: "network", Stage: ne.Method + " " + ne.Path, Cause: ne.Err.Error(), Recovery: "check connectivity to the Taiga URL (sandboxed agents need network access)", Exit: output.ExitNetwork}
+	}
+	var ce *ConflictError
+	if errors.As(err, &ce) {
+		cause := "resource changed concurrently"
+		if len(ce.Fields) > 0 {
+			cause = fmt.Sprintf("fields changed by someone else: %v", ce.Fields)
+		}
+		return &output.Error{Code: "version_conflict", Source: "api", Stage: ce.Method + " " + ce.Path, Cause: cause, Recovery: "re-read the resource and retry; use --force-version to override", Exit: output.ExitConflict}
 	}
 	var ae *APIError
 	if !errors.As(err, &ae) {
