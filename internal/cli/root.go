@@ -29,7 +29,7 @@ type App struct {
 	Cwd string
 	// HTTP overrides the HTTP client; nil means a client with httpTimeout.
 	HTTP *http.Client
-	// TokenSource builds the credentials for a run; nil means TAIGA_TOKEN only.
+	// TokenSource builds the credentials for a run; nil means the auth resolver.
 	TokenSource func(context.Context, *RunContext) (taiga.TokenSource, error)
 
 	ran         bool
@@ -71,6 +71,7 @@ func (a *App) root() *cobra.Command {
 		},
 	})
 	root.AddCommand(a.apiCmd())
+	root.AddCommand(a.authCmd())
 	return root
 }
 
@@ -83,7 +84,7 @@ func Main(args []string, in io.Reader, out, errOut io.Writer, env func(string) s
 // Run executes args against the app and returns the process exit code.
 func (a *App) Run(args []string) int {
 	if a.TokenSource == nil {
-		a.TokenSource = envTokenSource(a)
+		a.TokenSource = a.resolverTokenSource
 	}
 	if a.Cwd == "" {
 		if wd, err := os.Getwd(); err == nil {

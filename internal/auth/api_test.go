@@ -1,0 +1,96 @@
+package auth
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/BasisTI/taiga-cli/internal/output"
+)
+
+func TestLoginAndRefresh(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		switch r.URL.Path {
+		case "/api/v1/auth":
+			if body["type"] != "normal" || body["password"] != "pw" {
+				w.WriteHeader(401)
+				_, _ = w.Write([]byte(`{"_error_message":"bad"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"auth_token":"a1","refresh":"r1","id":166,"username":"svc"}`))
+		case "/api/v1/auth/refresh":
+			if body["refresh"] != "r1" {
+				w.WriteHeader(401)
+				return
+			}
+			_, _ = w.Write([]byte(`{"auth_token":"a2","refresh":"r2"}`))
+		}
+	}))
+	defer srv.Close()
+	res, err := Login(context.Background(), srv.Client(), srv.URL, "svc", []byte("pw"))
+	if err != nil || res.AuthToken != "a1" || res.UserID != 166 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	_, err = Login(context.Background(), srv.Client(), srv.URL, "svc", []byte("no"))
+	if e := output.AsError(err); e.Code != "auth_invalid_credentials" || e.Exit != 3 {
+		t.Fatalf("%+v", e)
+	}
+	a, r, err := RefreshToken(context.Background(), srv.Client(), srv.URL, "r1")
+	if err != nil || a != "a2" || r != "r2" {
+		t.Fatalf("%s %s %v", a, r, err)
+	}
+	_, _, err = RefreshToken(context.Background(), srv.Client(), srv.URL, "old")
+	if e := output.AsError(err); e.Code != "session_expired" {
+		t.Fatalf("%+v", e)
+	}
+}
+
+func TestLoginNeverFollowsRedirects(t *testing.T) {
+	var leaked int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&leaked, 1)
+	}))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+	if _, err := Login(context.Background(), srv.Client(), srv.URL, "svc", []byte("pw")); err == nil {
+		t.Fatal("a redirect must not count as a successful login")
+	}
+	if _, _, err := RefreshToken(context.Background(), srv.Client(), srv.URL, "r1"); err == nil {
+		t.Fatal("a redirect must not count as a successful refresh")
+	}
+	if atomic.LoadInt32(&leaked) != 0 {
+		t.Fatal("credentials were resent to the redirect target")
+	}
+}
+
+// Codex review #2: a server that echoes the payload must not put credentials in the envelope.
+func TestAuthErrorsNeverCopyResponseBody(t *testing.T) {
+	const marker = "FAKE_SECRET_MARKER"
+	for _, status := range []int{400, 401, 500, 200} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			w.WriteHeader(status)
+			body["auth_token"] = "" // a 200 echo must still be rejected as malformed
+			_ = json.NewEncoder(w).Encode(body)
+		}))
+		_, loginErr := Login(context.Background(), srv.Client(), srv.URL, "svc", []byte(marker))
+		_, _, refreshErr := RefreshToken(context.Background(), srv.Client(), srv.URL, marker)
+		srv.Close()
+		for _, err := range []error{loginErr, refreshErr} {
+			e := output.AsError(err)
+			if err == nil || strings.Contains(e.Cause+e.Stage+e.Recovery, marker) {
+				t.Fatalf("status %d: %+v", status, e)
+			}
+		}
+	}
+}

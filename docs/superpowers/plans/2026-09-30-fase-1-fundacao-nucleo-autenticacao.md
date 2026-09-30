@@ -32,7 +32,7 @@
 - Timeout HTTP de 30 s. Nova tentativa só em `GET`, por erro de rede ou 5xx, no máximo 2 novas tentativas.
 - Fluxo por US:
   - branch `TG-<ref>` a partir da `main` atualizada, com commits pequenos;
-  - PR para `main` com squash, revisado pelo Codex antes do merge;
+  - PR para `main` com squash, revisado pelo Codex antes do merge; título com verbo no infinitivo e a chave no final (ex.: `Implementar a autenticação TG-244`);
   - status da story no Taiga: `In progress` ao começar a US e `Ready for test` depois do merge. O agente **nunca** marca `Done`.
 
 ## Review Focus
@@ -561,7 +561,7 @@ Acrescente em `.github/workflows/ci.yml`, dentro de `jobs:`:
 git add -A
 git commit -m "Adicionar Taiga 6.7 local, seed e job de integração"
 git push -u origin TG-243
-gh pr create --title "TG-243 Fundação do repositório" --body "US #243 (Taiga Infraestrutura). Esqueleto, CI, GoReleaser e Taiga local para integração."
+gh pr create --title "Criar a fundação do repositório TG-243" --body "US #243 (Taiga Infraestrutura). Esqueleto, CI, GoReleaser e Taiga local para integração."
 ```
 
 Peça a revisão do Codex no PR. Depois do merge com squash:
@@ -2630,7 +2630,7 @@ gofmt -l . && go vet ./... && golangci-lint run ./...
 git add -A
 git commit -m "Adicionar comando taiga api com dry-run, paginação e auto-version"
 git push -u origin TG-245
-gh pr create --title "TG-245 Núcleo do cliente HTTP" --body "US #245 (Taiga Infraestrutura). Cliente da API v1, version, paginação, envelope de erro e taiga api."
+gh pr create --title "Adicionar o núcleo do cliente HTTP TG-245" --body "US #245 (Taiga Infraestrutura). Cliente da API v1, version, paginação, envelope de erro e taiga api."
 ```
 
 Peça a revisão do Codex. Depois do merge com squash:
@@ -4767,7 +4767,7 @@ Expected: o help lista `api`, `auth` e `version`, e o diagnóstico é impresso.
 git add -A
 git commit -m "Documentar instalação, autenticação, keyring headless e códigos de erro"
 git push -u origin TG-244
-gh pr create --title "TG-244 Autenticação" --body "US #244 (Taiga Infraestrutura). Cache de sessão, refresh sob flock, fontes de segredo, taiga auth e documentação do keyring headless."
+gh pr create --title "Implementar a autenticação TG-244" --body "US #244 (Taiga Infraestrutura). Cache de sessão, refresh sob flock, fontes de segredo, taiga auth e documentação do keyring headless."
 ```
 
 Peça a revisão do Codex. Depois do merge com squash, mude a US #244 para `Ready for test`.
