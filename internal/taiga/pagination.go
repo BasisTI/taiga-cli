@@ -11,7 +11,7 @@ import (
 
 // GetAll returns every item of a list endpoint, asking Taiga to disable pagination and following pages if it paginates anyway.
 func (c *Client) GetAll(ctx context.Context, path string, q url.Values) ([]json.RawMessage, error) {
-	var all []json.RawMessage
+	all := []json.RawMessage{}
 	for page := 1; page <= 1000; page++ {
 		qq := url.Values{}
 		for k, v := range q {

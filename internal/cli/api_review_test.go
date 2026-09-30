@@ -44,3 +44,12 @@ func TestAPIErrorStageNeverEchoesQueryValuesFromPath(t *testing.T) {
 		t.Fatalf("code=%d err=%s", code, errOut)
 	}
 }
+
+func TestAPIPaginateEmptyListPrintsEmptyArray(t *testing.T) {
+	srv, _ := fakeTaiga(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`[]`)) })
+	env := map[string]string{"TAIGA_URL": srv.URL, "TAIGA_TOKEN": "tok"}
+	out, errOut, code := runIn(t, env, "", "api", "GET", "userstories", "--paginate")
+	if code != 0 || strings.TrimSpace(out) != "[]" {
+		t.Fatalf("code=%d out=%q err=%s", code, out, errOut)
+	}
+}
