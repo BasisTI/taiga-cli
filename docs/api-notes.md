@@ -21,7 +21,8 @@ Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 202
 Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 2026-09-30, com a conta `admin`
 nos projetos descartáveis `cli-test` e `cli-test-probe-b` (este com épicos ativados pelo teste).
 Testes em `internal/taiga/stories_probe_integration_test.go`:
-`go test -tags integration -run '^TestProbe(Story|Users)' -v ./internal/taiga`.
+`go test -tags integration -run '^TestProbe(Story|Users)' -v ./internal/taiga`. Os itens marcados com
+*(manual)* foram observados com `curl` no mesmo Taiga local e não são reafirmados pelos testes.
 
 ### Resolução por ref
 
@@ -39,9 +40,9 @@ Testes em `internal/taiga/stories_probe_integration_test.go`:
 | `milestone`, `swimlane`, `status`, `tags` no POST e no PATCH | gravados; `null` limpa milestone/swimlane; PATCH exige `version` |
 | milestone, swimlane ou status de outro projeto | 403 `PermissionDenied` ("You don't have permissions to set this ... to this user story") |
 | `epics` no PATCH | **ignorado em silêncio**: responde 200, `version` sobe, `epics` continua igual |
-| vínculo de épico | `POST epics/<id>/related_userstories {"epic", "user_story"}` → 201, **sem `version`** e sem alterar a `version` da story; uma story aceita vários épicos; trocar ou remover o vínculo exige `DELETE` (`PATCH` no vínculo respondeu 500) |
+| vínculo de épico | `POST epics/<id>/related_userstories {"epic", "user_story"}` → 201, **sem `version`** e sem alterar a `version` da story; uma story aceita vários épicos *(manual)*; trocar ou remover o vínculo exige `DELETE` (`PATCH` no vínculo respondeu 500 *(manual)*) |
 | POST de story com `version` | aceito e gravado (a story nasce com a versão enviada); sem `version` nasce com 1. A CLI não envia `version` na criação |
-| tags | o servidor grava em minúsculas e sem duplicatas (`["Dup","dup"]` → `[["dup",null]]`) |
+| tags | o servidor grava em minúsculas; sem duplicatas (`["Dup","dup"]` → `[["dup",null]]`) *(manual)* |
 
 Consequência: `--epic` em `story create`/`story update` fica bloqueado com `unsupported_operation`
 (exit 2) até decisão humana, conforme o gate do plano (vínculo sem OCC e substituição por `DELETE`).
@@ -51,10 +52,10 @@ Consequência: `--epic` em `story create`/`story update` fica bloqueado com `uns
 
 | Parâmetro | Resultado |
 |---|---|
-| `status`, `assigned_users`, `epic`, `status__is_closed` (também `is_closed`), `q` | respeitados |
-| `tags=a,b` | respeitado, com semântica OU; repetir o parâmetro vale só o último |
-| `ref`, `swimlane`, `subject` e parâmetros desconhecidos | **ignorados** (lista inteira) |
-| projeto inexistente | 200 `[]` |
+| `status`, `assigned_users`, `epic`, `status__is_closed` (também `is_closed` *(manual)*), `q` | respeitados |
+| `tags=a,b` | respeitado, com semântica OU; repetir o parâmetro vale só o último *(manual)* |
+| `ref`, `swimlane` | **ignorados** (lista inteira); também `subject` e parâmetros desconhecidos *(manual)* |
+| projeto inexistente | 200 `[]` *(manual)* |
 
 A listagem traz `tags`, `assigned_users`, `epics` (objetos com `id`/`ref`), `is_closed` e `status`, o suficiente
 para conferir localmente cada filtro depois do `GetAll`.
