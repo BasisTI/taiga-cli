@@ -180,20 +180,31 @@ func (s *Service) Write(ctx context.Context, path string, before, patch Object, 
 	if err != nil {
 		return nil, taiga.ToOutput(err)
 	}
-	return reread(ctx, s.API, path, resp)
+	return reread(ctx, s.API, "PATCH", path, path, resp)
 }
 
-// reread returns the resource after a successful write. If the GET fails, the write response
-// is returned instead: reporting a failure would invite a re-run that repeats the write.
-func reread(ctx context.Context, api API, path string, written *taiga.Response) (Object, error) {
-	o, err := Read(ctx, api, path, nil)
+// reread returns the resource after a write that Taiga confirmed with a 2xx status. If the GET
+// fails, the write response stands in for it; if that does not decode either, the error says
+// the change was applied, because re-running the command would repeat it.
+func reread(ctx context.Context, api API, method, writePath, readPath string, written *taiga.Response) (Object, error) {
+	o, err := Read(ctx, api, readPath, nil)
 	if err == nil {
 		return o, nil
 	}
-	if written != nil {
-		if w, derr := Decode(written.Body); derr == nil {
-			return w, nil
-		}
+	if w, derr := Decode(written.Body); derr == nil {
+		return w, nil
 	}
-	return nil, err
+	return nil, WriteApplied(method, writePath, written.Status, err)
+}
+
+// WriteApplied reports a write confirmed by its HTTP status whose result could not be read.
+// It exits 1, not 7: scripts that retry network errors must not repeat an applied write.
+func WriteApplied(method, path string, status int, readErr error) error {
+	read := output.AsError(readErr)
+	cause := fmt.Sprintf("the change was applied (%s %s returned HTTP %d), but its result could not be read: %s", method, path, status, read.Error())
+	if read.Stage != "" {
+		cause += " (at " + read.Stage + ")"
+	}
+	return &output.Error{Code: "write_applied", Source: read.Source, Stage: fmt.Sprintf("%s %s", method, path), Cause: cause,
+		Recovery: "do not re-run the command: the change is already saved; check the story with `taiga story get` or `taiga story list`", Exit: output.ExitUnexpected}
 }

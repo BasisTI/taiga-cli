@@ -214,15 +214,18 @@ func (s *Service) CreateStory(ctx context.Context, body Object, dry bool) (any, 
 		return nil, taiga.ToOutput(err)
 	}
 	created, err := Decode(r.Body)
-	if err != nil || ID(created["id"]) <= 0 {
-		return nil, fmt.Errorf("POST userstories succeeded but returned no story id; do not re-run, look the story up with `taiga story list`")
+	if err == nil && ID(created["id"]) <= 0 {
+		err = fmt.Errorf("the response has no story id")
 	}
-	raw, err := reread(ctx, s.API, fmt.Sprintf("userstories/%d", ID(created["id"])), r)
+	if err != nil {
+		return nil, WriteApplied("POST", "userstories", r.Status, taiga.ToOutput(fmt.Errorf("decode the created story: %w", err)))
+	}
+	raw, err := reread(ctx, s.API, "POST", "userstories", fmt.Sprintf("userstories/%d", ID(created["id"])), r)
 	if err != nil {
 		return nil, err
 	}
 	if ID(raw["project"]) != ID(s.Project["id"]) || ID(raw["id"]) != ID(created["id"]) {
-		return nil, fmt.Errorf("re-read of the created story returned another story")
+		return nil, WriteApplied("POST", "userstories", r.Status, fmt.Errorf("the re-read returned another story than id %d", ID(created["id"])))
 	}
 	return s.StoryView(raw)
 }

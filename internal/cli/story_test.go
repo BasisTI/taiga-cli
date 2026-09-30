@@ -109,6 +109,8 @@ type storyFake struct {
 	nextID   int64
 	srv      string
 	onPatch  func(map[string]any)
+	// badWrite makes a successful PATCH/POST answer with a body that is not JSON.
+	badWrite bool
 }
 
 func newStoryFake(t *testing.T) (*storyFake, *[]recorded) {
@@ -260,6 +262,10 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		s["version"] = s["version"].(int) + 1
+		if f.badWrite {
+			_, _ = fmt.Fprint(w, `<html>proxy</html>`)
+			return
+		}
 		f.write(w, s)
 	case r.Method == "POST" && path == "userstories":
 		var body map[string]any
@@ -278,6 +284,10 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		f.stories[f.nextID] = s
 		w.WriteHeader(201)
+		if f.badWrite {
+			_, _ = fmt.Fprint(w, `<html>proxy</html>`)
+			return
+		}
 		f.write(w, s)
 	default:
 		f.t.Errorf("unexpected %s %s?%s", r.Method, path, r.URL.RawQuery)
@@ -661,5 +671,35 @@ func TestStoryWriteSucceedsWhenRereadFails(t *testing.T) {
 	out, stderr, code = runIn(t, f.env(), "", "story", "update", "246", "--append-description", "fim")
 	if code != 0 || !strings.Contains(out, `"description": "fim"`) || len(writes(calls)) != 2 {
 		t.Fatalf("update: %d %s %s", code, out, stderr)
+	}
+}
+
+// A write confirmed by its HTTP status whose result cannot be shown must say it was applied,
+// keep the re-read failure, and not look like a retryable server error.
+func TestStoryWriteAppliedButUnreadable(t *testing.T) {
+	f, calls := newStoryFake(t)
+	f.badWrite = true
+	f.fail["GET userstories/6808"] = 503
+	out, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--append-description", "fim")
+	if code != 1 || out != "" || !strings.Contains(stderr, `"code": "write_applied"`) || !strings.Contains(stderr, "injected") ||
+		!strings.Contains(stderr, "PATCH userstories/6808") || !strings.Contains(stderr, "do not re-run") {
+		t.Fatalf("update: %d %q %s", code, out, stderr)
+	}
+	if f.stories[6808]["description"] != "fim" || len(writes(calls)) != 1 {
+		t.Fatalf("write not applied once: %v", f.stories[6808]["description"])
+	}
+	// Re-read fine: the undecodable write response does not matter.
+	delete(f.fail, "GET userstories/6808")
+	out, stderr, code = runIn(t, f.env(), "", "story", "update", "246", "--subject", "novo")
+	if code != 0 || !strings.Contains(out, `"subject": "novo"`) {
+		t.Fatalf("re-read ok: %d %s %s", code, out, stderr)
+	}
+	// POST confirmed by 201 without a decodable body: the id is unknown, still applied.
+	_, stderr, code = runIn(t, f.env(), "", "story", "create", "--subject", "Nova")
+	if code != 1 || !strings.Contains(stderr, `"code": "write_applied"`) || !strings.Contains(stderr, "POST userstories") || !strings.Contains(stderr, "do not re-run") {
+		t.Fatalf("create: %d %s", code, stderr)
+	}
+	if n := len(writes(calls)); n != 3 {
+		t.Fatalf("writes %d", n)
 	}
 }
