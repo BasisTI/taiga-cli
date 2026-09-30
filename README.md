@@ -30,6 +30,30 @@ taiga api GET userstories --query project=37 --paginate
 taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-version
 ```
 
+## Stories
+
+`taiga story` works on the user stories of the selected project (`--project`, `TAIGA_PROJECT`, `.taiga.toml` or the config). A story is named by its reference (`REF`, the number shown in the web UI), never by its internal id; `story get --id` takes the id and still checks the project.
+
+| Command | What it does |
+|---|---|
+| `taiga story list [--ref N] [--status S] [--assignee USER\|me] [--epic REF] [--tag T]... [--search TEXT] [--closed[=false]]` | Every matching story, without manual paging. Repeated `--tag` must all match |
+| `taiga story get REF` / `taiga story get --id ID` | One story, with its web `url` |
+| `taiga story create --subject S [--description-file F\|-] [--status S] [--tag T]... [--swimlane L]` | Create a story |
+| `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L]` | Send only the fields that change, with the story `version` |
+| `taiga story close REF [--status S]` | Move to a closed status; never archives or deletes |
+
+- Statuses, milestones and swimlanes take a name or an id of the project; users take an exact username, an id or `me`, and must be project members. A name used twice is `ambiguous_name`.
+- `--tag` replaces the tags; `--add-tag`/`--remove-tag` merge with the current ones. Taiga stores tags in lower case, so the CLI sends them that way.
+- `close` without `--status` uses the project's only closed status; with several (the default template has `Done` and `Archived`) it asks for one.
+- Every write accepts `--dry-run` (prints method, path and body) and, except `create`, `--force-version`.
+- `--epic` on `create`/`update` answers `unsupported_operation`: Taiga links epics through a separate, unversioned resource whose replacement needs `DELETE` (see [docs/api-notes.md](docs/api-notes.md)).
+
+```sh
+taiga story list --assignee me --closed=false
+taiga story update 246 --status "In progress" --add-tag cli --dry-run
+taiga story update 246 --description-file notes.md
+```
+
 ## Output and exit codes
 
 Without a terminal on stdout, `taiga` prints JSON; on a terminal it prints text. Force either with `--output json` or `--output text`. Errors go to stderr as `{"error":{"code","source","stage","cause","recovery"}}`; `code` is stable and `cause` never contains a secret.
