@@ -589,7 +589,7 @@ Não detalhado aqui; plano próprio depois da fase 3. Escopo decidido (2026-10-0
 | 2026-10-01 | **Tasks:** paridade do MCP + `task field` + bloqueio + comentários + due date; sem milestone | Cedric, nesta conversa |
 | 2026-10-01 | **Fase 4:** skill + migração; o TOML de exemplo vira canônico após conferência com o script atual, aprovada pelo Cedric na própria #254 | Cedric, nesta conversa |
 
-### Propostas do plano a validar na revisão (o plano segue com elas se ninguém objetar)
+### Propostas do plano (aprovadas pelo Cedric na revisão do plano, 2026-10-01)
 
 1. **Upload idempotente por conteúdo:** mesmo `name` e mesmo `sha1` já anexados → devolve o existente sem enviar. Alternativa: sempre enviar (o Taiga aceita duplicatas).
 2. **`url` assinado fora da saída** de `attachment list`/`upload` (dá acesso sem autenticação por alguns minutos). Alternativa: incluir no JSON.
