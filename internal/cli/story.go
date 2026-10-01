@@ -36,7 +36,7 @@ var errEpicLink = app.Unsupported("linking a story to an epic is not supported y
 
 func (a *App) storyCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "story", Short: "Read and update user stories"}
-	cmd.AddCommand(a.storyListCmd(), a.storyGetCmd(), a.storyWriteCmd(false), a.storyWriteCmd(true), a.storyCloseCmd())
+	cmd.AddCommand(a.storyListCmd(), a.storyGetCmd(), a.storyWriteCmd(false), a.storyWriteCmd(true), a.storyCloseCmd(), a.storyFieldCmd())
 	return cmd
 }
 
@@ -67,6 +67,11 @@ func (a *App) storyGetCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		values, err := service.FieldValues(cmd.Context(), "story", app.ID(raw["id"]))
+		if err != nil {
+			return err
+		}
+		view["custom_attributes"] = values
 		return a.renderCurated(view)
 	}
 	cmd.Flags().Int64Var(&id, "id", 0, "internal story id, exclusive with REF")

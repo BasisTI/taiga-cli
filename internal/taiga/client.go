@@ -66,7 +66,8 @@ type Response struct {
 	Body   []byte
 }
 
-// Do sends one API request. GET is retried up to twice on network errors and 5xx.
+// Do sends one API request. GET is retried up to twice on network errors and 5xx. A write whose
+// 2xx answer cannot be read fails with *UnreadableBodyError, never with a network error.
 func (c *Client) Do(ctx context.Context, r Request) (*Response, error) {
 	var payload []byte
 	if r.Body != nil {
@@ -123,6 +124,10 @@ func (c *Client) Do(ctx context.Context, r Request) (*Response, error) {
 		body, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
+			if r.Method != http.MethodGet && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				// The status confirmed the write; only its answer was lost. Never retried.
+				return nil, &UnreadableBodyError{Method: r.Method, Path: r.Path, Status: resp.StatusCode, Header: resp.Header, Err: err}
+			}
 			lastErr = &NetworkError{Method: r.Method, Path: r.Path, Err: err}
 			continue
 		}

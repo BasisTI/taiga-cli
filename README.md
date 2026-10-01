@@ -37,10 +37,12 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 | Command | What it does |
 |---|---|
 | `taiga story list [--ref N] [--status S] [--assignee USER\|me] [--epic REF] [--tag T]... [--search TEXT] [--closed[=false]]` | Every matching story, without manual paging. Repeated `--tag` must all match |
-| `taiga story get REF` / `taiga story get --id ID` | One story, with its web `url` |
+| `taiga story get REF` / `taiga story get --id ID` | One story, with its web `url`; JSON output also carries `custom_attributes` (values with their own `version`) |
 | `taiga story create --subject S [--description-file F\|-] [--status S] [--tag T]... [--swimlane L] [--assignee USER]...` | Create a story |
 | `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L] [--add-assignee USER]... [--remove-assignee USER]... [--owner-assignee USER\|--clear-owner-assignee] [--block NOTE\|--unblock]` | Send only the fields that change, with the story `version` |
 | `taiga story close REF [--status S]` | Move to a closed status; never archives or deletes |
+| `taiga story field list REF` | The story's custom field values next to their definitions |
+| `taiga story field set REF "Name=value"...` | Merge custom field values: named fields change, the others stay |
 
 - Statuses, milestones and swimlanes take a name or an id of the project; users take an exact username, an id or `me`, and must be project members. A name used twice is `ambiguous_name`.
 - `--tag` replaces the tags; `--add-tag`/`--remove-tag` merge with the current ones. Taiga stores tags in lower case, so the CLI sends them that way.
@@ -57,6 +59,24 @@ taiga story list --assignee me --closed=false
 taiga story update 246 --status "In progress" --add-tag cli --dry-run
 taiga story update 246 --description-file notes.md
 taiga story update 247 --add-assignee me --remove-assignee jdoe --block "waiting for the B6 review"
+```
+
+## Custom fields
+
+| Command | What it does |
+|---|---|
+| `taiga field list --kind story\|task` | The project's custom field definitions |
+| `taiga field create --kind story\|task --name NAME --type text\|date\|checkbox [--description TEXT] [--dry-run]` | Create a definition unless one with that name exists |
+| `taiga story field list REF` / `taiga story field set REF "Name=value"... [--dry-run] [--force-version]` | Read and merge a story's values |
+
+- `field create` is idempotent: an existing definition with the same name (case-sensitive) and type is returned unchanged; one with another type, or another description when `--description` is given, is `field_definition_conflict` (exit 2). Definitions are never changed or deleted.
+- Only `text`, `date` and `checkbox` are supported so far. Values: text as is (`null` is text), checkbox `true`/`false`, date `YYYY-MM-DD`. The name ends at the first `=`. There is no syntax to unset a field yet.
+- `story field set` reads the values, merges the named fields and writes the whole dictionary with the `version` of the values resource, not the story's. Unchanged values write nothing. Values of fields without a definition are kept.
+- Taiga never refuses an old `version` on custom field values, so it cannot stop a concurrent write from being overwritten. The CLI checks the answer instead: if another write landed next to ours, it exits with `field_values_postcondition_failed` (exit 4) and the write **was applied**; check with `story field list` instead of re-running. `--force-version` skips the check. See [docs/api-notes.md](docs/api-notes.md).
+
+```sh
+taiga field create --kind story --name "Tested in staging" --type checkbox
+taiga story field set 246 "Tested in staging=true" "Delivery=2026-10-15" "Notes=a=b is fine"
 ```
 
 ## Output and exit codes

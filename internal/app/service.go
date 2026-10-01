@@ -191,7 +191,7 @@ func (s *Service) send(ctx context.Context, path string, before, patch Object, f
 		if raw, err = Snapshot(before); err != nil {
 			return nil, err
 		}
-		resp, err = s.API.WriteVersionedFrom(ctx, "PATCH", path, patch, raw, force)
+		resp, err = confirmed(s.API.WriteVersionedFrom(ctx, "PATCH", path, patch, raw, force))
 	}
 	if err != nil {
 		return nil, taiga.ToOutput(err)
@@ -220,10 +220,21 @@ func (s *Service) writeOnce(ctx context.Context, path string, before, patch Obje
 		body[k] = v
 	}
 	body["version"] = before["version"]
-	resp, err := s.API.Do(ctx, taiga.Request{Method: "PATCH", Path: path, Body: body})
+	resp, err := confirmed(s.API.Do(ctx, taiga.Request{Method: "PATCH", Path: path, Body: body}))
 	var ae *taiga.APIError
 	if err != nil && errors.As(err, &ae) && ae.IsVersionConflict() {
 		return nil, &taiga.ConflictError{Method: "PATCH", Path: path, Fields: opaqueKeys}
+	}
+	return resp, err
+}
+
+// confirmed turns a PATCH whose 2xx answer was lost (*taiga.UnreadableBodyError) into a
+// response without body, so it takes the path of an answer that does not decode: re-read,
+// postcondition and, if the re-read fails too, write_applied.
+func confirmed(resp *taiga.Response, err error) (*taiga.Response, error) {
+	var ue *taiga.UnreadableBodyError
+	if errors.As(err, &ue) {
+		return &taiga.Response{Status: ue.Status, Header: ue.Header}, nil
 	}
 	return resp, err
 }

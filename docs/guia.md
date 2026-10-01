@@ -53,6 +53,22 @@ taiga story close 246 --status Done
 - `close` só muda o status para um status fechado: não arquiva nem exclui. No template padrão há dois status fechados (`Done` e `Archived`), então informe `--status`.
 - Vincular story a épico (`--epic`) ainda não é suportado: o Taiga faz o vínculo por um recurso à parte, sem `version`, e trocar o vínculo exige `DELETE`. Use a interface web por enquanto.
 
+## Campos customizados
+
+```sh
+taiga field list --kind story
+taiga field create --kind story --name "Testado em staging" --type checkbox
+taiga field create --kind task --name "Horas" --type text --description "estimativa"
+taiga story field list 246
+taiga story field set 246 "Testado em staging=true" "Data de entrega=2026-10-15" "Notas=texto com = no meio"
+```
+
+- `field create` pode ser repetido: se já existe definição com o mesmo nome (sensível a maiúsculas) e o mesmo tipo, ela é devolvida sem alteração; com outro tipo, ou outra descrição quando `--description` é informado, sai `field_definition_conflict` (exit 2). A CLI nunca altera nem apaga definições.
+- Tipos aceitos por enquanto: `text`, `date` (`AAAA-MM-DD`) e `checkbox` (`true`/`false`). O nome vai até o primeiro `=`; o texto `null` é gravado como texto. Ainda não há como limpar um campo.
+- `story field set` junta os campos informados aos atuais e grava o dicionário inteiro com o `version` do recurso de valores, que é outro, independente do `version` da story. `story get` mostra os dois: o da story no topo e o dos valores em `custom_attributes`.
+- O Taiga não recusa `version` antigo nos valores de campos customizados. A CLI confere a resposta: se outra gravação caiu junto da nossa, sai `field_values_postcondition_failed` (exit 4) e a alteração **foi gravada**; confira com `taiga story field list` antes de repetir.
+- Campos de task: as definições já têm `field list/create --kind task`; o comando de valores de task vem com a #253.
+
 ## `taiga api` para o que ainda não tem comando próprio
 
 Enquanto os comandos curados das próximas fases não chegam, `taiga api` cobre as receitas que hoje estão na skill `basis-ci-gitlab`. O caminho é relativo a `/api/v1/`, e `--auto-version` lê o `version` atual antes de gravar.

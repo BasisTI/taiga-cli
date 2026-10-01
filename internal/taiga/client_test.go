@@ -164,3 +164,52 @@ func TestToOutputVersionConflictRecovery(t *testing.T) {
 		}
 	}
 }
+
+// truncating answers status with a Content-Length it does not honour: the body is cut and the
+// connection closed, as when a proxy or the network drops the answer after the status line.
+func truncating(t *testing.T, status int, hits *atomic.Int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"attribu`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestDoWriteWithTruncatedBodyAfter2xxIsConfirmedNotNetwork(t *testing.T) {
+	for _, method := range []string{"POST", "PATCH", "PUT"} {
+		var hits atomic.Int32
+		c := New(truncating(t, 200, &hits).URL, StaticToken{}, WithRetryWait(0))
+		_, err := c.Do(context.Background(), Request{Method: method, Path: "userstories/custom-attributes-values/7?x=secret", Body: map[string]any{"a": 1}})
+		var ue *UnreadableBodyError
+		if !errors.As(err, &ue) || ue.Status != 200 || ue.Method != method {
+			t.Fatalf("%s: %T %v", method, err, err)
+		}
+		if hits.Load() != 1 {
+			t.Fatalf("%s: write repeated %d times", method, hits.Load())
+		}
+		e := ToOutput(err)
+		if e.Code != "write_applied" || e.Exit != output.ExitUnexpected || strings.Contains(e.Error(), "secret") || !strings.Contains(e.Cause, "HTTP 200") {
+			t.Fatalf("%s: %+v", method, e)
+		}
+	}
+}
+
+func TestDoTruncatedBodyOtherwiseStaysANetworkError(t *testing.T) {
+	var hits atomic.Int32
+	c := New(truncating(t, 200, &hits).URL, StaticToken{}, WithRetryWait(0))
+	_, err := c.Do(context.Background(), Request{Method: "GET", Path: "userstories/7"})
+	var ne *NetworkError
+	if !errors.As(err, &ne) || hits.Load() != 3 {
+		t.Fatalf("GET: %T %v, %d attempts", err, err, hits.Load())
+	}
+	hits.Store(0)
+	c = New(truncating(t, 400, &hits).URL, StaticToken{}, WithRetryWait(0))
+	_, err = c.Do(context.Background(), Request{Method: "PATCH", Path: "userstories/7", Body: map[string]any{}})
+	if !errors.As(err, &ne) || hits.Load() != 1 {
+		t.Fatalf("PATCH 400: %T %v, %d attempts", err, err, hits.Load())
+	}
+}

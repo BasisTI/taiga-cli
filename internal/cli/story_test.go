@@ -116,6 +116,30 @@ type storyFake struct {
 	// acceptStale accepts a PATCH with an old version, as Taiga does when the fields sent did not
 	// change since (per-field OCC, docs/api-notes.md).
 	acceptStale bool
+	// defs holds custom field definitions by endpoint; values the custom-attributes-values
+	// resources by path. Both are created lazily by the field tests.
+	defs   map[string][]map[string]any
+	values map[string]map[string]any
+	tasks  map[int64]map[string]any
+	// onDefPost runs before a definition POST is handled (to simulate a concurrent create).
+	onDefPost func()
+	// onValues runs on each GET or PATCH of a values resource, before it is handled.
+	onValues func(method string, v map[string]any)
+	// onPatchValues runs on the stored values after a PATCH is applied, before the answer.
+	onPatchValues func(v map[string]any)
+	// badValuesWrite makes a successful values PATCH answer with a body that is not JSON.
+	badValuesWrite bool
+	// truncate makes a successful write answer cut short after the status line (the connection
+	// drops mid-body), for every write.
+	truncate bool
+}
+
+// cut answers status with a Content-Length it does not honour, so the client sees the status
+// but cannot read the body.
+func cut(w http.ResponseWriter, status int) {
+	w.Header().Set("Content-Length", "1000")
+	w.WriteHeader(status)
+	_, _ = fmt.Fprint(w, `{"id":`)
 }
 
 func newStoryFake(t *testing.T) (*storyFake, *[]recorded) {
@@ -146,6 +170,12 @@ func newStoryFake(t *testing.T) (*storyFake, *[]recorded) {
 		pageSize: 2,
 		fail:     map[string]int{},
 		nextID:   6900,
+		values: map[string]map[string]any{
+			"userstories/custom-attributes-values/6808": {"attributes_values": map[string]any{"27": true, "999": "orphan"}, "version": 19, "user_story": 6808},
+			"userstories/custom-attributes-values/6809": {"attributes_values": map[string]any{}, "version": 1, "user_story": 6809},
+			"userstories/custom-attributes-values/6810": {"attributes_values": map[string]any{}, "version": 1, "user_story": 6810},
+			"userstories/custom-attributes-values/7001": {"attributes_values": map[string]any{}, "version": 1, "user_story": 7001},
+		},
 	}
 	srv, calls := fakeTaiga(t, f.handle)
 	f.srv = srv.URL
@@ -194,6 +224,9 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 			return false
 		}
 		return true
+	}
+	if f.handleFields(w, r, path) {
+		return
 	}
 	switch {
 	case r.Method == "GET" && (path == "projects/37" || path == "projects/by_slug" && q.Get("slug") == f.slug):
@@ -270,6 +303,10 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		s["version"] = s["version"].(int) + 1
+		if f.truncate {
+			cut(w, 200)
+			return
+		}
 		if f.badWrite {
 			_, _ = fmt.Fprint(w, `<html>proxy</html>`)
 			return
@@ -291,6 +328,10 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		f.stories[f.nextID] = s
+		if f.truncate {
+			cut(w, 201)
+			return
+		}
 		w.WriteHeader(201)
 		if f.badWrite {
 			_, _ = fmt.Fprint(w, `<html>proxy</html>`)

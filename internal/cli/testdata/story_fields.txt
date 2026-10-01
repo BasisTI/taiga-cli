@@ -1,0 +1,8 @@
+ref:                            246
+id:                             6808
+version:                        19
+url:                            http://taiga.test/project/infra-2025/us/246
+Testado em staging (checkbox):  true
+Data de entrega (date):         
+Notas (text):                   
+#999 (no definition):           orphan

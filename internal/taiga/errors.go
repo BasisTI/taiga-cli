@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -49,6 +50,21 @@ func (e *NetworkError) Error() string {
 }
 func (e *NetworkError) Unwrap() error { return e.Err }
 
+// UnreadableBodyError is a write (POST, PATCH, PUT) that Taiga confirmed with a 2xx status
+// whose body could not be read: the change is applied, so it must never look like a network
+// error that is safe to repeat. The client never retries it.
+type UnreadableBodyError struct {
+	Method, Path string
+	Status       int
+	Header       http.Header
+	Err          error
+}
+
+func (e *UnreadableBodyError) Error() string {
+	return fmt.Sprintf("%s %s returned HTTP %d, but its body could not be read: %s", e.Method, stagePath(e.Path), e.Status, transportCause(e.Err))
+}
+func (e *UnreadableBodyError) Unwrap() error { return e.Err }
+
 // ConflictError means another writer changed the fields we are updating.
 type ConflictError struct {
 	Method, Path string
@@ -93,6 +109,12 @@ func ToOutput(err error) *output.Error {
 	var ne *NetworkError
 	if errors.As(err, &ne) {
 		return &output.Error{Code: "network_error", Source: "network", Stage: ne.Method + " " + stagePath(ne.Path), Cause: transportCause(ne.Err), Recovery: "check connectivity to the Taiga URL (sandboxed agents need network access)", Exit: output.ExitNetwork}
+	}
+	var ue *UnreadableBodyError
+	if errors.As(err, &ue) {
+		return &output.Error{Code: "write_applied", Source: "network", Stage: ue.Method + " " + stagePath(ue.Path),
+			Cause:    fmt.Sprintf("the change was applied (%s %s returned HTTP %d), but its answer could not be read: %s", ue.Method, stagePath(ue.Path), ue.Status, transportCause(ue.Err)),
+			Recovery: "do not repeat the request: the change is already saved; read the resource to see its current state", Exit: output.ExitUnexpected}
 	}
 	var ce *ConflictError
 	if errors.As(err, &ce) {

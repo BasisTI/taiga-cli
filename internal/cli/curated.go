@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/BasisTI/taiga-cli/internal/app"
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -42,7 +44,10 @@ func (a *App) readContent(path string) (string, error) {
 // storyTextKeys is the text summary of a story; JSON output carries the whole object.
 var storyTextKeys = []string{"ref", "id", "version", "subject", "status", "is_closed", "tags", "assigned_to", "assigned_users", "is_blocked", "url"}
 
-func (a *App) renderCurated(v any) error {
+func (a *App) renderCurated(v any) error { return a.renderKeys(v, storyTextKeys) }
+
+// renderKeys writes v as JSON, or in text as the given keys of each object.
+func (a *App) renderKeys(v any, textKeys []string) error {
 	mode, err := output.DetectMode(a.output, a.OutTTY)
 	if err != nil {
 		return err
@@ -53,7 +58,7 @@ func (a *App) renderCurated(v any) error {
 	switch x := v.(type) {
 	case app.Object:
 		fields := []output.Field{}
-		for _, k := range storyTextKeys {
+		for _, k := range textKeys {
 			val, ok := x[k]
 			if !ok {
 				continue
@@ -69,7 +74,11 @@ func (a *App) renderCurated(v any) error {
 			if names, ok := val.([]string); ok {
 				val = strings.Join(names, ", ")
 			}
-			fields = append(fields, output.Field{Key: k, Value: fmt.Sprint(val)})
+			text := fmt.Sprint(val)
+			if strings.ContainsFunc(text, unicode.IsControl) {
+				text = strconv.Quote(text) // one line per key: a line break cannot forge another key
+			}
+			fields = append(fields, output.Field{Key: k, Value: text})
 		}
 		return output.WriteFields(a.Out, fields)
 	case []app.Object:
@@ -79,7 +88,7 @@ func (a *App) renderCurated(v any) error {
 					return err
 				}
 			}
-			if err := a.renderCurated(o); err != nil {
+			if err := a.renderKeys(o, textKeys); err != nil {
 				return err
 			}
 		}
