@@ -43,12 +43,22 @@ func (a *App) storyFieldListCmd() *cobra.Command {
 
 func (a *App) storyFieldSetCmd() *cobra.Command {
 	var dry, force bool
-	cmd := &cobra.Command{Use: "set REF Name=value...", Short: "Merge custom field values into a story", Args: cobra.MinimumNArgs(2),
+	var unsets []string
+	cmd := &cobra.Command{Use: "set REF [Name=value]... [--unset NAME]...", Short: "Merge custom field values into a story", Args: cobra.MinimumNArgs(1),
 		Long: "Sets each named field and keeps the others. The name ends at the first \"=\"; text values are taken as is, " +
-			"checkbox values are true or false and dates are YYYY-MM-DD. There is no syntax to unset a field."}
+			"checkbox values are true or false and dates are YYYY-MM-DD. --unset clears a checkbox or date field (stored as null); " +
+			"the text \"null\" is never a cleared value, and a text field is set to empty with Name=."}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if err := validRef(args[0]); err != nil {
 			return err
+		}
+		if len(args) == 1 && len(unsets) == 0 {
+			return app.Usage("at least one Name=value or --unset NAME is required")
+		}
+		for _, name := range unsets {
+			if name == "" {
+				return app.Usage("--unset needs a field name")
+			}
 		}
 		for _, entry := range args[1:] {
 			if name, _, ok := strings.Cut(entry, "="); !ok || name == "" {
@@ -63,7 +73,7 @@ func (a *App) storyFieldSetCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		result, err := service.SetFieldValues(cmd.Context(), "story", app.ID(story["id"]), args[1:], dry, force)
+		result, err := service.SetFieldValues(cmd.Context(), "story", app.ID(story["id"]), args[1:], unsets, dry, force)
 		if err != nil {
 			return err
 		}
@@ -73,6 +83,7 @@ func (a *App) storyFieldSetCmd() *cobra.Command {
 		}
 		return a.renderStoryFields(cmd.Context(), service, story, values)
 	}
+	cmd.Flags().StringArrayVar(&unsets, "unset", nil, "clear a checkbox or date field (repeatable)")
 	cmd.Flags().BoolVar(&dry, "dry-run", false, "print the request without writing")
 	cmd.Flags().BoolVar(&force, "force-version", false, "skip the check for a concurrent write of the custom fields")
 	return cmd
@@ -121,8 +132,12 @@ func (a *App) renderStoryFields(ctx context.Context, service *app.Service, story
 
 // jsonValue prints plain text as is; empty text, text with control or format characters (line
 // breaks and bidi overrides included) and any other value print as JSON, so each field stays on one line and a stored ""
-// differs from a field without value.
+// differs from a field without value. A cleared value (null) prints empty, like a field without
+// value, so it never reads as the text "null"; JSON output keeps the null.
 func jsonValue(v any) string {
+	if v == nil {
+		return ""
+	}
 	if s, ok := v.(string); ok && s != "" && !strings.ContainsFunc(s, unsafeRune) {
 		return s
 	}

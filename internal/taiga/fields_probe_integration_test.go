@@ -202,3 +202,49 @@ func TestProbeTaskFieldValues(t *testing.T) {
 		t.Fatalf("the task version moved: %v", again["version"])
 	}
 }
+
+// US #260: unset is a null value kept under its key. The read returns the key with null, a
+// null for a key that was absent adds it (the server stores it, so it is not a no-op there),
+// and a dictionary whose only key is null is accepted: clearing the last field keeps the key.
+func TestProbeFieldValuesUnset(t *testing.T) {
+	c, project := fieldsProject(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	def := func(path, typ string) string {
+		return fmt.Sprint(probeDo(t, c, "POST", path, nil, map[string]any{"project": project, "name": "unset " + typ + " " + suffix, "type": typ}).int("id"))
+	}
+	for _, kind := range []struct{ defs, values, create string }{
+		{"userstory-custom-attributes", "userstories/custom-attributes-values/%d", "story"},
+		{"task-custom-attributes", "tasks/custom-attributes-values/%d", "task"},
+	} {
+		date, check := def(kind.defs, "date"), def(kind.defs, "checkbox")
+		var owner probeObject
+		if kind.create == "story" {
+			owner = createStory(t, c, project, "unset "+suffix, nil)
+		} else {
+			owner = probeDo(t, c, "POST", "tasks", nil, map[string]any{"project": project, "subject": "unset " + suffix})
+		}
+		path := fmt.Sprintf(kind.values, owner.int("id"))
+
+		probeDo(t, c, "PATCH", path, nil, map[string]any{"version": 1, "attributes_values": map[string]any{date: "2026-09-30", check: true}})
+		v := probeDo(t, c, "PATCH", path, nil, map[string]any{"version": 2, "attributes_values": map[string]any{date: nil, check: true}})
+		got := probeDo(t, c, "GET", path, nil, nil)
+		if m := valuesOf(t, got); v.int("version") != 3 || len(m) != 2 || m[date] != nil || m[check] != true {
+			t.Fatalf("%s read null (the key must stay): %s", kind.create, got["attributes_values"])
+		}
+		// The last field set to null: accepted, with the key kept.
+		v = probeDo(t, c, "PATCH", path, nil, map[string]any{"version": 3, "attributes_values": map[string]any{check: nil}})
+		if m := valuesOf(t, probeDo(t, c, "GET", path, nil, nil)); v.int("version") != 4 || len(m) != 1 || m[check] != nil {
+			t.Fatalf("%s last field: %v", kind.create, m)
+		}
+		// null for an absent key: stored as a new key, and the version moves.
+		v = probeDo(t, c, "PATCH", path, nil, map[string]any{"version": 4, "attributes_values": map[string]any{check: nil, date: nil}})
+		if m := valuesOf(t, probeDo(t, c, "GET", path, nil, nil)); v.int("version") != 5 || len(m) != 2 {
+			t.Fatalf("%s absent key: %v", kind.create, m)
+		}
+		// The same dictionary again: the server still bumps the version.
+		v = probeDo(t, c, "PATCH", path, nil, map[string]any{"version": 5, "attributes_values": map[string]any{check: nil, date: nil}})
+		if v.int("version") != 6 {
+			t.Fatalf("%s same dictionary: %v", kind.create, v)
+		}
+	}
+}

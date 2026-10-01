@@ -28,8 +28,8 @@ func ValuePath(kind string, id int64) (string, error) {
 }
 
 // ParseFieldValue converts raw to the JSON value of a field of type typ. Taiga does not
-// validate values (docs/api-notes.md), so the CLI does. There is no syntax to unset a field:
-// "null" is text, and an empty date is refused.
+// validate values (docs/api-notes.md), so the CLI does. An assignment never unsets a field:
+// "null" is text, and an empty date is refused; unsetting takes UnsetFieldValue.
 func ParseFieldValue(typ, raw string) (any, error) {
 	switch typ {
 	case "text":
@@ -49,6 +49,18 @@ func ParseFieldValue(typ, raw string) (any, error) {
 		return raw, nil
 	}
 	return nil, Usage("unsupported field type: " + typ + " (text, date and checkbox can be set)")
+}
+
+// unsettable are the types whose value can be cleared (stored as null). A text field has a
+// value of its own for "empty", the empty text, so unsetting it is refused.
+var unsettable = map[string]bool{"checkbox": true, "date": true}
+
+// UnsetFieldValue checks that a field of type typ can be cleared.
+func UnsetFieldValue(typ, name string) error {
+	if !unsettable[typ] {
+		return Usage(fmt.Sprintf("field %s has type %s: only checkbox and date fields can be unset (set a text field to empty with %s=)", name, typ, name))
+	}
+	return nil
 }
 
 // MergeValues returns current with updates applied; keys not in updates are kept as read.
@@ -94,12 +106,15 @@ func (s *Service) FieldValues(ctx context.Context, kind string, id int64) (Objec
 	return values, nil
 }
 
-// SetFieldValues merges the Name=value entries into the values of the story or task id and
-// writes the whole dictionary with the version of the values resource. Every entry is resolved
-// and parsed before anything is read or written; an unchanged dictionary writes nothing.
-func (s *Service) SetFieldValues(ctx context.Context, kind string, id int64, entries []string, dry, force bool) (any, error) {
-	if len(entries) == 0 {
-		return nil, Usage("at least one field assignment is required")
+// SetFieldValues merges the Name=value entries into the values of the story or task id, clears
+// the fields named in unsets, and writes the whole dictionary with the version of the values
+// resource. A cleared field keeps its key with null: Taiga refuses an empty dictionary, so the
+// key cannot be dropped. Clearing a field without a stored value adds nothing, because an
+// absent key and null both mean no value. Every entry is resolved and parsed before anything
+// is read or written; an unchanged dictionary writes nothing.
+func (s *Service) SetFieldValues(ctx context.Context, kind string, id int64, entries, unsets []string, dry, force bool) (any, error) {
+	if len(entries)+len(unsets) == 0 {
+		return nil, Usage("at least one field assignment or --unset is required")
 	}
 	defs, err := s.Fields(ctx, kind)
 	if err != nil {
@@ -125,11 +140,31 @@ func (s *Service) SetFieldValues(ctx context.Context, kind string, id int64, ent
 		}
 		updates[key] = value
 	}
+	cleared := map[string]bool{}
+	for _, name := range unsets {
+		def, err := Resolve(defs, name, "name")
+		if err != nil {
+			return nil, err
+		}
+		key := fmt.Sprint(def["id"])
+		if _, exists := updates[key]; exists || cleared[key] {
+			return nil, Usage("duplicate field assignment: " + name)
+		}
+		if err := UnsetFieldValue(fmt.Sprint(def["type"]), name); err != nil {
+			return nil, err
+		}
+		cleared[key] = true
+	}
 	before, err := s.FieldValues(ctx, kind, id)
 	if err != nil {
 		return nil, err
 	}
 	current := Object(before["attributes_values"].(map[string]any))
+	for key := range cleared {
+		if _, stored := current[key]; stored {
+			updates[key] = nil
+		}
+	}
 	merged := MergeValues(current, updates)
 	if equal(current, merged) {
 		return before, nil

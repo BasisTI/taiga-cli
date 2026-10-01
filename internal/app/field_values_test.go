@@ -86,7 +86,7 @@ func TestTaskFieldValuesUseTheTaskRoutes(t *testing.T) {
 	if _, err := s.FieldValues(context.Background(), "task", 6); exitOf(err) != 2 {
 		t.Fatalf("task of another project: %v", err)
 	}
-	got, err := s.SetFieldValues(context.Background(), "task", 5, []string{"Horas=8h"}, false, false)
+	got, err := s.SetFieldValues(context.Background(), "task", 5, []string{"Horas=8h"}, nil, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +95,44 @@ func TestTaskFieldValuesUseTheTaskRoutes(t *testing.T) {
 	}
 	body := api.patches[0].Body.(map[string]any)
 	if ID(body["version"]) != 9 || !reflect.DeepEqual(body["attributes_values"], Object{"1": "8h", "2": true}) {
+		t.Fatalf("body %v", body)
+	}
+	if v := got.(Object); ID(v["version"]) != 10 {
+		t.Fatalf("%v", v)
+	}
+}
+
+func TestTaskFieldValuesUnset(t *testing.T) {
+	api := &patchAPI{fakeAPI: fakeAPI{
+		objects: map[string]string{
+			"tasks/5":                          `{"id":5,"ref":18,"project":37,"version":4}`,
+			"tasks/custom-attributes-values/5": `{"attributes_values":{"2":true},"version":9,"task":5}`,
+		},
+		lists: map[string]string{"task-custom-attributes": `[{"id":1,"name":"Horas","type":"text","project":37},` +
+			`{"id":2,"name":"Pago","type":"checkbox","project":37},{"id":3,"name":"Prazo","type":"date","project":37}]`},
+	}}
+	s := service(t, &api.fakeAPI)
+	s.API = api
+	ctx := context.Background()
+	if _, err := s.SetFieldValues(ctx, "task", 5, nil, []string{"Horas"}, false, false); exitOf(err) != 2 {
+		t.Fatalf("text unset: %v", err)
+	}
+	if _, err := s.SetFieldValues(ctx, "task", 5, nil, nil, false, false); exitOf(err) != 2 {
+		t.Fatalf("nothing to do: %v", err)
+	}
+	// Prazo has no value: nothing changes, nothing is written.
+	if got, err := s.SetFieldValues(ctx, "task", 5, nil, []string{"Prazo"}, false, false); err != nil || len(api.patches) != 0 || ID(got.(Object)["version"]) != 9 {
+		t.Fatalf("absent: %v %v %+v", got, err, api.patches)
+	}
+	got, err := s.SetFieldValues(ctx, "task", 5, nil, []string{"Pago", "Prazo"}, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.patches) != 1 || api.patches[0].Path != "tasks/custom-attributes-values/5" {
+		t.Fatalf("%+v", api.patches)
+	}
+	body := api.patches[0].Body.(map[string]any)
+	if ID(body["version"]) != 9 || !reflect.DeepEqual(body["attributes_values"], Object{"2": nil}) {
 		t.Fatalf("body %v", body)
 	}
 	if v := got.(Object); ID(v["version"]) != 10 {

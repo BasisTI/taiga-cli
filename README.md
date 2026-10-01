@@ -42,7 +42,7 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 | `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L] [--add-assignee USER]... [--remove-assignee USER]... [--owner-assignee USER\|--clear-owner-assignee] [--block NOTE\|--unblock]` | Send only the fields that change, with the story `version` |
 | `taiga story close REF [--status S]` | Move to a closed status; never archives or deletes |
 | `taiga story field list REF` | The story's custom field values next to their definitions |
-| `taiga story field set REF "Name=value"...` | Merge custom field values: named fields change, the others stay |
+| `taiga story field set REF ["Name=value"]... [--unset NAME]...` | Merge custom field values: named fields change, the others stay |
 | `taiga story comment REF --body TEXT\|--body-file F\|-` | Publish a comment (Markdown); sent once, never repeated |
 | `taiga story comments REF [--include-system]` | The story's comments, newest first |
 
@@ -73,16 +73,18 @@ taiga story comments 246 --output text
 |---|---|
 | `taiga field list --kind story\|task` | The project's custom field definitions |
 | `taiga field create --kind story\|task --name NAME --type text\|date\|checkbox [--description TEXT] [--dry-run]` | Create a definition unless one with that name exists |
-| `taiga story field list REF` / `taiga story field set REF "Name=value"... [--dry-run] [--force-version]` | Read and merge a story's values |
+| `taiga story field list REF` / `taiga story field set REF ["Name=value"]... [--unset NAME]... [--dry-run] [--force-version]` | Read and merge a story's values |
 
 - `field create` is idempotent: an existing definition with the same name (case-sensitive) and type is returned unchanged; one with another type, or another description when `--description` is given, is `field_definition_conflict` (exit 2). Definitions are never changed or deleted.
-- Only `text`, `date` and `checkbox` are supported so far. Values: text as is (`null` is text), checkbox `true`/`false`, date `YYYY-MM-DD`. The name ends at the first `=`. There is no syntax to unset a field yet.
+- Only `text`, `date` and `checkbox` are supported so far. Values: text as is (`null` is text), checkbox `true`/`false`, date `YYYY-MM-DD`. The name ends at the first `=`.
+- `--unset NAME` (repeatable, name or id) clears a `checkbox` or `date` field: Taiga stores `null` under its key, which stays even when it is the last field (Taiga refuses an empty dictionary). A field without a value, or already `null`, writes nothing. Text fields cannot be unset (usage error); set them to empty with `Name=`. JSON output shows the cleared value as `null`; text output shows it empty, like a field without value. The same merge, check and `--dry-run` apply.
 - `story field set` reads the values, merges the named fields and writes the whole dictionary with the `version` of the values resource, not the story's. Unchanged values write nothing. Values of fields without a definition are kept.
 - Taiga never refuses an old `version` on custom field values, so it cannot stop a concurrent write from being overwritten. The CLI checks the answer instead: if another write landed next to ours, it exits with `field_values_postcondition_failed` (exit 4) and the write **was applied**; check with `story field list` instead of re-running. `--force-version` skips the check. See [docs/api-notes.md](docs/api-notes.md).
 
 ```sh
 taiga field create --kind story --name "Tested in staging" --type checkbox
 taiga story field set 246 "Tested in staging=true" "Delivery=2026-10-15" "Notes=a=b is fine"
+taiga story field set 246 --unset "Tested in staging" --unset "Delivery"
 ```
 
 ## Output and exit codes

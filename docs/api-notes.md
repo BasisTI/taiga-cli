@@ -17,7 +17,7 @@ Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 202
 | Escrita de swimlane, upload de anexo | fases 2 e 3 | — |
 | Comentários (`PATCH {comment, version}`, `history/userstory`, integração GitLab) | validado na fase 2; ver "comentários" | `TestProbeCommentContract`, `TestProbeCommentHistoryPages`, `TestIntegrationStoryComments` |
 | Relação `assigned_to` × `assigned_users`, bloqueio | validado na fase 2; ver "responsáveis e bloqueio" | `TestProbeStoryAssignees`, `TestProbeStoryBlock` |
-| Campos customizados (definições e valores) de story e task | validado na fase 2; ver "campos customizados" | `TestProbeFieldDefinitions`, `TestProbeFieldValues`, `TestProbeTaskFieldValues` |
+| Campos customizados (definições e valores) de story e task | validado na fase 2; ver "campos customizados" | `TestProbeFieldDefinitions`, `TestProbeFieldValues`, `TestProbeTaskFieldValues`, `TestProbeFieldValuesUnset` |
 
 ## Fase 2 — stories (US #246)
 
@@ -274,8 +274,35 @@ Consequências na CLI (`story field set`, e o serviço de valores de task):
   antes da escrita. A janela entre essa leitura e o `PATCH` é detectada, não evitada. `--force-version` pula a
   conferência;
 - como o servidor não valida valores, a CLI valida: `checkbox` só `true`/`false`, `date` só `AAAA-MM-DD` válida.
-  Não há sintaxe para limpar campo (`null`); o texto `null` continua texto. O Taiga aceita `null` em date/checkbox,
-  mas a sintaxe de unset é decisão humana (plano, "Pontos a validar").
+  O texto `null` continua texto; limpar é `--unset` (abaixo).
+
+### Limpar valores: `null` (US #260)
+
+Observado no Taiga local (`taigaio/taiga-back:6.7.3`) em 2026-10-01, em story e em task, no projeto
+`cli-test-probe-fields`: `go test -tags integration -run '^TestProbeFieldValuesUnset$' -v ./internal/taiga`.
+
+| Requisição | Resultado |
+|---|---|
+| `PATCH` com `{date: null, checkbox: true}` | 200, `version` + 1; o `GET` devolve a chave com `null` (não some) |
+| `PATCH` com só `{checkbox: null}` (o último campo) | 200: um dicionário só com `null` é aceito, ao contrário de `{}` (400) |
+| `null` numa chave que não existia | 200, `version` + 1, e a chave passa a existir com `null`: **não** é no-op no servidor |
+| o mesmo dicionário de novo | 200, `version` + 1: o servidor não compara com o atual |
+
+Consequências na CLI (`story field set --unset NOME`, e o serviço de valores de task):
+
+- limpar é gravar `null` na chave, nunca tirar a chave: o dicionário nunca fica vazio, e `null` é o que o Taiga
+  devolve na leitura;
+- chave ausente e `null` significam "sem valor"; limpar um campo nessa situação não envia nada (o servidor
+  acrescentaria a chave e subiria a `version` à toa). Por isso o no-op é da CLI, não do servidor;
+- só `checkbox` e `date`. `text` é recusado com erro de uso, embora o servidor aceite `null` em qualquer tipo:
+  texto já tem o seu "vazio" (`Nome=`) e um segundo estado sem valor só criaria ambiguidade na leitura;
+- `--unset` entra no mesmo merge, com a mesma `version` do recurso de valores, a mesma pós-condição
+  (`field_values_postcondition_failed`, comparando `null` com `null`), a mesma releitura para resposta ilegível e o
+  mesmo `--dry-run`; o mesmo campo atribuído e limpo no mesmo comando é `duplicate field assignment`;
+- exibição: no JSON de `story get` (`custom_attributes.attributes_values`) e de `story field list`
+  (`attributes_values` e `fields[].value`) o valor limpo sai `null`, distinto do campo sem chave (sem `value`); no
+  texto de `story field list` sai vazio, como campo sem valor, para nunca se confundir com o texto `null`.
+  `story get` em texto não mostra campos customizados.
 
 
 ## Fase 2 — comentários (US #250)
