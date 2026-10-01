@@ -75,7 +75,7 @@ func (a *App) renderKeys(v any, textKeys []string) error {
 				val = strings.Join(names, ", ")
 			}
 			text := fmt.Sprint(val)
-			if strings.ContainsFunc(text, unicode.IsControl) {
+			if strings.ContainsFunc(text, unsafeRune) {
 				text = strconv.Quote(text) // one line per key: a line break cannot forge another key
 			}
 			fields = append(fields, output.Field{Key: k, Value: text})
@@ -114,4 +114,10 @@ func (a *App) renderKeys(v any, textKeys []string) error {
 		}
 		return output.WriteFields(a.Out, fields)
 	}
+}
+
+// unsafeRune is a rune that can break or disguise a "key: value" line: controls, line and
+// paragraph separators, and format characters such as bidi overrides.
+func unsafeRune(r rune) bool {
+	return unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp)
 }

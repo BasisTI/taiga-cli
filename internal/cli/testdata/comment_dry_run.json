@@ -1,0 +1,9 @@
+{
+  "dry_run": true,
+  "method": "PATCH",
+  "path": "userstories/6808",
+  "body": {
+    "comment": "texto \"x\"",
+    "version": 7
+  }
+}

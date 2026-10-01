@@ -132,6 +132,14 @@ type storyFake struct {
 	// truncate makes a successful write answer cut short after the status line (the connection
 	// drops mid-body), for every write.
 	truncate bool
+	// history holds the history entries of each story, newest first (comment tests).
+	history map[int64][]map[string]any
+	// commentStatus answers a comment PATCH with this status and commentAnswer, storing the
+	// comment only when commentApplied; afterComment runs after a comment PATCH is handled.
+	commentStatus  int
+	commentAnswer  string
+	commentApplied bool
+	afterComment   func()
 }
 
 // cut answers status with a Content-Length it does not honour, so the client sees the status
@@ -225,7 +233,7 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return true
 	}
-	if f.handleFields(w, r, path) {
+	if f.handleFields(w, r, path) || f.handleComments(w, r, path) {
 		return
 	}
 	switch {

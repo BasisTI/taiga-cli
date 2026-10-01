@@ -43,6 +43,8 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 | `taiga story close REF [--status S]` | Move to a closed status; never archives or deletes |
 | `taiga story field list REF` | The story's custom field values next to their definitions |
 | `taiga story field set REF "Name=value"...` | Merge custom field values: named fields change, the others stay |
+| `taiga story comment REF --body TEXT\|--body-file F\|-` | Publish a comment (Markdown); sent once, never repeated |
+| `taiga story comments REF [--include-system]` | The story's comments, newest first |
 
 - Statuses, milestones and swimlanes take a name or an id of the project; users take an exact username, an id or `me`, and must be project members. A name used twice is `ambiguous_name`.
 - `--tag` replaces the tags; `--add-tag`/`--remove-tag` merge with the current ones. Taiga stores tags in lower case, so the CLI sends them that way.
@@ -52,6 +54,8 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 - `--block NOTE` sets `is_blocked` with the note (required); `--unblock` clears both.
 - `close` without `--status` uses the project's only closed status; with several (the default template has `Done` and `Archived`) it asks for one.
 - Every write accepts `--dry-run` (prints method, path and body) and, except `create`, `--force-version`.
+- `comment` sends the text exactly as given (quotes, accents, line breaks) and never touches the description. A blank comment is refused. Taiga accepts any past `version` for a comment, so the version protects nothing there and there is no `--force-version`: the comment is sent once. If the answer is lost (network error or 5xx), the CLI looks for it in the story history: found, the command succeeds; not found, it fails with the network or server error; history unreadable, `comment_unconfirmed` (exit 1). Check `story comments` before publishing again.
+- `comments` lists every comment, including edited and deleted ones (`edit_comment_date`, `delete_comment_date`). Comments written by Taiga's own GitLab integration (its inactive `gitlab-<hash>` user, with the push hook templates "This user story has been mentioned by …" and "… changed the status from [GitLab commit]…") are hidden unless `--include-system`; every other author, service accounts included, is always shown. Each entry carries `is_system`, `story_ref` and the story `url`.
 - `--epic` on `create`/`update` answers `unsupported_operation`: Taiga links epics through a separate, unversioned resource whose replacement needs `DELETE` (see [docs/api-notes.md](docs/api-notes.md)).
 
 ```sh
@@ -59,6 +63,8 @@ taiga story list --assignee me --closed=false
 taiga story update 246 --status "In progress" --add-tag cli --dry-run
 taiga story update 246 --description-file notes.md
 taiga story update 247 --add-assignee me --remove-assignee jdoe --block "waiting for the B6 review"
+taiga story comment 246 --body-file note.md
+taiga story comments 246 --output text
 ```
 
 ## Custom fields

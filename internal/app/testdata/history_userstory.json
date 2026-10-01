@@ -1,0 +1,245 @@
+[
+  {
+    "id": "1d01a92c-bd8d-11f1-9937-3a8627fadd1b",
+    "user": {
+      "pk": 6,
+      "username": "svc",
+      "name": "Service Account",
+      "photo": null,
+      "is_active": true,
+      "gravatar_id": "00000000000000000000000000000000"
+    },
+    "created_at": "2026-10-01T11:41:59.988Z",
+    "type": 1,
+    "key": "userstories.userstory:57",
+    "diff": {},
+    "snapshot": null,
+    "values": {
+      "users": {}
+    },
+    "values_diff": {},
+    "comment": "Decisão do PO: aceitar o risco (registrada pela conta de integração)",
+    "comment_html": "<p>Decisão do PO: aceitar o risco (registrada pela conta de integração)</p>",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "edit_comment_date": null,
+    "is_hidden": false,
+    "is_snapshot": false
+  },
+  {
+    "id": "f1eec8c8-bd8c-11f1-9937-3a8627fadd1b",
+    "user": {
+      "pk": 3,
+      "username": "gitlab-75a8ccb9ff104f85988c6be846d37aa5",
+      "name": "GitLab",
+      "photo": "http://localhost:8000/media/user/logo.png",
+      "is_active": false,
+      "gravatar_id": "00000000000000000000000000000000"
+    },
+    "created_at": "2026-10-01T11:40:47.722Z",
+    "type": 1,
+    "key": "userstories.userstory:57",
+    "diff": {
+      "status": [
+        25,
+        28
+      ]
+    },
+    "snapshot": null,
+    "values": {
+      "users": {},
+      "status": {
+        "25": "New",
+        "28": "Ready for test"
+      }
+    },
+    "values_diff": {
+      "status": [
+        "New",
+        "Ready for test"
+      ]
+    },
+    "comment": "Dev Exemplo changed the status from [GitLab commit](https://gitlab.example/g/p/-/commit/def456 \"See commit 'def456 - Fechar TG-1 #ready-for-test'\")\n\n  - Status: **New** → **Ready for test**",
+    "comment_html": "<p>Dev Exemplo changed the status from <a href=\"https://gitlab.example/g/p/-/commit/def456\" target=\"_blank\" title=\"See commit 'def456 - Fechar TG-1 #ready-for-test'\">GitLab commit</a></p>\n<ul>\n<li>Status: <strong>New</strong> → <strong>Ready for test</strong></li>\n</ul>",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "edit_comment_date": null,
+    "is_hidden": false,
+    "is_snapshot": false
+  },
+  {
+    "id": "f1dd4abc-bd8c-11f1-9937-3a8627fadd1b",
+    "user": {
+      "pk": 3,
+      "username": "gitlab-75a8ccb9ff104f85988c6be846d37aa5",
+      "name": "GitLab",
+      "photo": "http://localhost:8000/media/user/logo.png",
+      "is_active": false,
+      "gravatar_id": "00000000000000000000000000000000"
+    },
+    "created_at": "2026-10-01T11:40:47.607Z",
+    "type": 1,
+    "key": "userstories.userstory:57",
+    "diff": {},
+    "snapshot": null,
+    "values": {
+      "users": {}
+    },
+    "values_diff": {},
+    "comment": "This user story has been mentioned by Dev Exemplo in the [GitLab commit](https://gitlab.example/g/p/-/commit/abc123 \"See commit 'abc123 - Ajustar parser TG-1'\") \"Ajustar parser TG-1\"",
+    "comment_html": "<p>This user story has been mentioned by Dev Exemplo in the <a href=\"https://gitlab.example/g/p/-/commit/abc123\" target=\"_blank\" title=\"See commit 'abc123 - Ajustar parser TG-1'\">GitLab commit</a> \"Ajustar parser TG-1\"</p>",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "edit_comment_date": null,
+    "is_hidden": false,
+    "is_snapshot": false
+  },
+  {
+    "id": "d60d938c-bd8c-11f1-aef4-3a8627fadd1b",
+    "user": {
+      "pk": 5,
+      "username": "admin",
+      "name": "admin",
+      "photo": null,
+      "is_active": true,
+      "gravatar_id": "00000000000000000000000000000000"
+    },
+    "created_at": "2026-10-01T11:40:00.948Z",
+    "type": 1,
+    "key": "userstories.userstory:57",
+    "diff": {},
+    "snapshot": null,
+    "values": {
+      "users": {}
+    },
+    "values_diff": {},
+    "comment": "   ",
+    "comment_html": "",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "edit_comment_date": null,
+    "is_hidden": false,
+    "is_snapshot": false
+  },
+  {
+    "id": "d5d3e7ae-bd8c-11f1-a529-3a8627fadd1b",
+    "user": {
+      "pk": 5,
+      "username": "admin",
+      "name": "admin",
+      "photo": null,
+      "is_active": true,
+      "gravatar_id": "00000000000000000000000000000000"
+    },
+    "created_at": "2026-10-01T11:40:00.570Z",
+    "type": 1,
+    "key": "userstories.userstory:57",
+    "diff": {},
+    "snapshot": null,
+    "values": {
+      "users": {}
+    },
+    "values_diff": {},
+    "comment": "version 1 editado",
+    "comment_html": "<p>version 1 editado</p>",
+    "delete_comment_date": "2026-10-01T11:40:01.150Z",
+    "delete_comment_user": {
+      "pk": 5,
+      "name": "admin"
+    },
+    "edit_comment_date": "2026-10-01T11:40:01.104Z",
+    "is_hidden": false,
+    "is_snapshot": false
+  },
+  {
+    "id": "d5af4ca0-bd8c-11f1-aef4-3a8627fadd1b",
+    "user": {
+      "pk": 5,
+      "username": "admin",
+      "name": "admin",
+      "photo": null,
+      "is_active": true,
+      "gravatar_id": "00000000000000000000000000000000"
+    },
+    "created_at": "2026-10-01T11:40:00.330Z",
+    "type": 1,
+    "key": "userstories.userstory:57",
+    "diff": {},
+    "snapshot": null,
+    "values": {
+      "users": {}
+    },
+    "values_diff": {},
+    "comment": "comentario com version antiga",
+    "comment_html": "<p>comentario com version antiga</p>",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "edit_comment_date": null,
+    "is_hidden": false,
+    "is_snapshot": false
+  },
+  {
+    "id": "d597eaba-bd8c-11f1-a529-3a8627fadd1b",
+    "user": {
+      "pk": 5,
+      "username": "admin",
+      "name": "admin",
+      "photo": null,
+      "is_active": true,
+      "gravatar_id": "00000000000000000000000000000000"
+    },
+    "created_at": "2026-10-01T11:40:00.177Z",
+    "type": 1,
+    "key": "userstories.userstory:57",
+    "diff": {
+      "subject": [
+        "probe comments 1790854799",
+        "changed"
+      ]
+    },
+    "snapshot": null,
+    "values": {
+      "users": {}
+    },
+    "values_diff": {
+      "subject": [
+        "probe comments 1790854799",
+        "changed"
+      ]
+    },
+    "comment": "",
+    "comment_html": "",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "edit_comment_date": null,
+    "is_hidden": false,
+    "is_snapshot": false
+  },
+  {
+    "id": "d5744e20-bd8c-11f1-a529-3a8627fadd1b",
+    "user": {
+      "pk": 5,
+      "username": "admin",
+      "name": "admin",
+      "photo": null,
+      "is_active": true,
+      "gravatar_id": "00000000000000000000000000000000"
+    },
+    "created_at": "2026-10-01T11:39:59.943Z",
+    "type": 1,
+    "key": "userstories.userstory:57",
+    "diff": {},
+    "snapshot": null,
+    "values": {
+      "users": {}
+    },
+    "values_diff": {},
+    "comment": "primeiro \"aspas\" acentuação\nlinha 2 **md**",
+    "comment_html": "<p>primeiro \"aspas\" acentuação<br>\nlinha 2 <strong>md</strong></p>",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "edit_comment_date": null,
+    "is_hidden": false,
+    "is_snapshot": false
+  }
+]

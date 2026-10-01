@@ -1,0 +1,160 @@
+[
+  {
+    "comment": "Decisão do PO: aceitar o risco (registrada pela conta de integração)",
+    "comment_html": "<p>Decisão do PO: aceitar o risco (registrada pela conta de integração)</p>",
+    "created_at": "2026-10-01T11:41:59.988Z",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "diff": {},
+    "edit_comment_date": null,
+    "id": "1d01a92c-bd8d-11f1-9937-3a8627fadd1b",
+    "is_hidden": false,
+    "is_snapshot": false,
+    "is_system": false,
+    "key": "userstories.userstory:57",
+    "snapshot": null,
+    "story_id": 6808,
+    "story_ref": 246,
+    "type": 1,
+    "url": "http://taiga.test/project/infra-2025/us/246",
+    "user": {
+      "gravatar_id": "00000000000000000000000000000000",
+      "is_active": true,
+      "name": "Service Account",
+      "photo": null,
+      "pk": 6,
+      "username": "svc"
+    },
+    "values": {
+      "users": {}
+    },
+    "values_diff": {}
+  },
+  {
+    "comment": "   ",
+    "comment_html": "",
+    "created_at": "2026-10-01T11:40:00.948Z",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "diff": {},
+    "edit_comment_date": null,
+    "id": "d60d938c-bd8c-11f1-aef4-3a8627fadd1b",
+    "is_hidden": false,
+    "is_snapshot": false,
+    "is_system": false,
+    "key": "userstories.userstory:57",
+    "snapshot": null,
+    "story_id": 6808,
+    "story_ref": 246,
+    "type": 1,
+    "url": "http://taiga.test/project/infra-2025/us/246",
+    "user": {
+      "gravatar_id": "00000000000000000000000000000000",
+      "is_active": true,
+      "name": "admin",
+      "photo": null,
+      "pk": 5,
+      "username": "admin"
+    },
+    "values": {
+      "users": {}
+    },
+    "values_diff": {}
+  },
+  {
+    "comment": "version 1 editado",
+    "comment_html": "<p>version 1 editado</p>",
+    "created_at": "2026-10-01T11:40:00.570Z",
+    "delete_comment_date": "2026-10-01T11:40:01.150Z",
+    "delete_comment_user": {
+      "name": "admin",
+      "pk": 5
+    },
+    "diff": {},
+    "edit_comment_date": "2026-10-01T11:40:01.104Z",
+    "id": "d5d3e7ae-bd8c-11f1-a529-3a8627fadd1b",
+    "is_hidden": false,
+    "is_snapshot": false,
+    "is_system": false,
+    "key": "userstories.userstory:57",
+    "snapshot": null,
+    "story_id": 6808,
+    "story_ref": 246,
+    "type": 1,
+    "url": "http://taiga.test/project/infra-2025/us/246",
+    "user": {
+      "gravatar_id": "00000000000000000000000000000000",
+      "is_active": true,
+      "name": "admin",
+      "photo": null,
+      "pk": 5,
+      "username": "admin"
+    },
+    "values": {
+      "users": {}
+    },
+    "values_diff": {}
+  },
+  {
+    "comment": "comentario com version antiga",
+    "comment_html": "<p>comentario com version antiga</p>",
+    "created_at": "2026-10-01T11:40:00.330Z",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "diff": {},
+    "edit_comment_date": null,
+    "id": "d5af4ca0-bd8c-11f1-aef4-3a8627fadd1b",
+    "is_hidden": false,
+    "is_snapshot": false,
+    "is_system": false,
+    "key": "userstories.userstory:57",
+    "snapshot": null,
+    "story_id": 6808,
+    "story_ref": 246,
+    "type": 1,
+    "url": "http://taiga.test/project/infra-2025/us/246",
+    "user": {
+      "gravatar_id": "00000000000000000000000000000000",
+      "is_active": true,
+      "name": "admin",
+      "photo": null,
+      "pk": 5,
+      "username": "admin"
+    },
+    "values": {
+      "users": {}
+    },
+    "values_diff": {}
+  },
+  {
+    "comment": "primeiro \"aspas\" acentuação\nlinha 2 **md**",
+    "comment_html": "<p>primeiro \"aspas\" acentuação<br>\nlinha 2 <strong>md</strong></p>",
+    "created_at": "2026-10-01T11:39:59.943Z",
+    "delete_comment_date": null,
+    "delete_comment_user": null,
+    "diff": {},
+    "edit_comment_date": null,
+    "id": "d5744e20-bd8c-11f1-a529-3a8627fadd1b",
+    "is_hidden": false,
+    "is_snapshot": false,
+    "is_system": false,
+    "key": "userstories.userstory:57",
+    "snapshot": null,
+    "story_id": 6808,
+    "story_ref": 246,
+    "type": 1,
+    "url": "http://taiga.test/project/infra-2025/us/246",
+    "user": {
+      "gravatar_id": "00000000000000000000000000000000",
+      "is_active": true,
+      "name": "admin",
+      "photo": null,
+      "pk": 5,
+      "username": "admin"
+    },
+    "values": {
+      "users": {}
+    },
+    "values_diff": {}
+  }
+]

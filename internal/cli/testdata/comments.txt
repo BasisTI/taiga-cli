@@ -1,0 +1,36 @@
+id:          1d01a92c-bd8d-11f1-9937-3a8627fadd1b
+created_at:  2026-10-01T11:41:59.988Z
+author:      svc
+is_system:   false
+comment:     Decisão do PO: aceitar o risco (registrada pela conta de integração)
+url:         http://taiga.test/project/infra-2025/us/246
+
+id:          d60d938c-bd8c-11f1-aef4-3a8627fadd1b
+created_at:  2026-10-01T11:40:00.948Z
+author:      admin
+is_system:   false
+comment:        
+url:         http://taiga.test/project/infra-2025/us/246
+
+id:          d5d3e7ae-bd8c-11f1-a529-3a8627fadd1b
+created_at:  2026-10-01T11:40:00.570Z
+author:      admin
+is_system:   false
+edited_at:   2026-10-01T11:40:01.104Z
+deleted_at:  2026-10-01T11:40:01.150Z
+comment:     version 1 editado
+url:         http://taiga.test/project/infra-2025/us/246
+
+id:          d5af4ca0-bd8c-11f1-aef4-3a8627fadd1b
+created_at:  2026-10-01T11:40:00.330Z
+author:      admin
+is_system:   false
+comment:     comentario com version antiga
+url:         http://taiga.test/project/infra-2025/us/246
+
+id:          d5744e20-bd8c-11f1-a529-3a8627fadd1b
+created_at:  2026-10-01T11:39:59.943Z
+author:      admin
+is_system:   false
+comment:     "primeiro \"aspas\" acentuação\nlinha 2 **md**"
+url:         http://taiga.test/project/infra-2025/us/246
