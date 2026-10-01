@@ -309,12 +309,13 @@ Consequências na CLI (`story comment`):
   ocultada);
 - resposta 2xx ilegível (`UnreadableBodyError`, corpo truncado) segue o caminho de releitura das outras escritas: o
   status já confirma a gravação; se a releitura falhar, `write_applied`;
-- erro sem resposta conclusiva (rede ou 5xx): antes do `PATCH` a CLI guarda os ids dos comentários do próprio usuário
-  (`users/me`) com exatamente o mesmo texto; depois da falha relê o histórico. Um id novo com o texto = publicado
-  (sucesso, story relida); nenhum = sai o erro original (exit 7), avisando que o comentário não estava no histórico
-  logo depois da falha; histórico ilegível = `comment_unconfirmed` (exit 1). **Limite:** uma requisição ainda em
-  andamento no servidor (timeout do cliente) pode gravar depois da conferência; por isso a recuperação manda conferir
-  `story comments` antes de publicar de novo.
+- erro sem resposta conclusiva (rede depois de aberta a conexão, timeout ou 5xx): antes do `PATCH` a CLI guarda os
+  ids dos comentários do próprio usuário (`users/me`) com exatamente o mesmo texto; depois da falha relê o histórico.
+  Um id novo com o texto = publicado (sucesso, story relida). Nenhum, ou histórico ilegível = `comment_unconfirmed`
+  (exit 1): a ausência não prova que o `PATCH` falhou, porque um gateway pode responder 503 enquanto o servidor ainda
+  grava, e o comentário aparece depois da conferência (achado da revisão do PR #7: um script que repetia o exit 7
+  criou duas cópias). O erro de rede original (exit 7, repetível) só sai quando a conexão nem abriu (DNS, conexão
+  recusada).
 
 ### Leitura: `GET history/userstory/<id>`
 

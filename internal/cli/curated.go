@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf16"
 
 	"github.com/BasisTI/taiga-cli/internal/app"
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -110,10 +111,32 @@ func (a *App) renderKeys(v any, textKeys []string) error {
 		sort.Strings(keys)
 		fields := []output.Field{}
 		for _, k := range keys {
-			fields = append(fields, output.Field{Key: k, Value: string(object[k])})
+			fields = append(fields, output.Field{Key: k, Value: escapeJSON(string(object[k]))})
 		}
 		return output.WriteFields(a.Out, fields)
 	}
+}
+
+// escapeJSON writes each unsafe rune of JSON text as a \u escape. Such runes only occur inside
+// JSON strings, where the escape keeps the text valid and equal once decoded.
+func escapeJSON(s string) string {
+	if !strings.ContainsFunc(s, unsafeRune) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if !unsafeRune(r) {
+			b.WriteRune(r)
+			continue
+		}
+		if r > 0xffff {
+			r1, r2 := utf16.EncodeRune(r)
+			fmt.Fprintf(&b, "\\u%04x\\u%04x", r1, r2)
+			continue
+		}
+		fmt.Fprintf(&b, "\\u%04x", r)
+	}
+	return b.String()
 }
 
 // unsafeRune is a rune that can break or disguise a "key: value" line: controls, line and

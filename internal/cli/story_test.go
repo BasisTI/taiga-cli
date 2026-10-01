@@ -140,6 +140,8 @@ type storyFake struct {
 	commentAnswer  string
 	commentApplied bool
 	afterComment   func()
+	// afterHistory runs after the first page of each history read of a story is answered.
+	afterHistory func(id int64)
 }
 
 // cut answers status with a Content-Length it does not honour, so the client sees the status

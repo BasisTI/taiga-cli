@@ -47,6 +47,9 @@ func (f *storyFake) handleComments(w http.ResponseWriter, r *http.Request, path 
 			return true
 		}
 		f.list(w, r, entries)
+		if f.afterHistory != nil && r.URL.Query().Get("page") == "" {
+			f.afterHistory(id)
+		}
 		return true
 	}
 	if r.Method != "PATCH" || !strings.HasPrefix(path, "userstories/") {
@@ -241,12 +244,13 @@ func TestStoryCommentRejectsBadInputBeforeNetwork(t *testing.T) {
 	}
 }
 
-// A 5xx leaves the outcome unknown. The PATCH is never repeated; the history decides.
+// A 5xx leaves the outcome unknown. The PATCH is never repeated; the history decides, and a
+// comment missing from it is still unconfirmed (exit 1), never a repeatable exit 7.
 func TestStoryCommentServerErrorIsNeverRepeated(t *testing.T) {
 	f, calls := commentFake(t)
 	f.commentStatus, f.commentAnswer = 503, `{"_error_message":"busy"}`
 	_, stderr, code := runIn(t, f.env(), "", "story", "comment", "246", "--body", "primeiro \"aspas\" acentuação\nlinha 2 **md**")
-	if code != 7 || !strings.Contains(stderr, "not in the history right after the failure") || !strings.Contains(stderr, "taiga story comments 246") {
+	if code != 1 || !strings.Contains(stderr, `"comment_unconfirmed"`) || !strings.Contains(stderr, "may still be running") || !strings.Contains(stderr, "taiga story comments 246") {
 		t.Fatalf("%d %s", code, stderr)
 	}
 	if len(writes(calls)) != 1 {
@@ -260,6 +264,55 @@ func TestStoryCommentServerErrorIsNeverRepeated(t *testing.T) {
 	out, stderr, code := runIn(t, f.env(), "", "story", "comment", "246", "--body", "primeiro \"aspas\" acentuação\nlinha 2 **md**")
 	if code != 0 || !strings.Contains(out, `"version": 8`) || len(writes(calls)) != 1 {
 		t.Fatalf("%d %s %s %+v", code, out, stderr, writes(calls))
+	}
+}
+
+// The review case: a gateway answers 503 while the PATCH is still running upstream, and the
+// comment lands only after the CLI checked the history. A script that repeats exit 7 must not
+// publish a second copy.
+func TestStoryCommentLandingAfterTheCheckIsNotRepeatable(t *testing.T) {
+	f, calls := commentFake(t)
+	f.commentStatus, f.commentAnswer = 503, `{"_error_message":"gateway timed out; upstream still running"}`
+	body := "late " + strings.Repeat("x", 3)
+	reads := 0
+	f.afterHistory = func(id int64) {
+		if reads++; reads == 2 { // the check after the PATCH: the upstream write lands now
+			f.history[id] = append([]map[string]any{{"id": "late-entry", "type": 1, "comment": body,
+				"user": map[string]any{"pk": 5, "username": "admin", "is_active": true}}}, f.history[id]...)
+		}
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		_, stderr, code := runIn(t, f.env(), "", "story", "comment", "246", "--body", body)
+		if code != 7 {
+			if code != 1 || !strings.Contains(stderr, `"comment_unconfirmed"`) {
+				t.Fatalf("%d %s", code, stderr)
+			}
+			break
+		}
+	}
+	copies := 0
+	for _, e := range f.history[6808] {
+		if e["comment"] == body {
+			copies++
+		}
+	}
+	if copies != 1 || len(writes(calls)) != 1 {
+		t.Fatalf("copies %d, writes %d", copies, len(writes(calls)))
+	}
+}
+
+func TestStoryCommentDryRunTextEscapesFormatCharacters(t *testing.T) {
+	f, _ := commentFake(t)
+	f.defs = map[string][]map[string]any{"userstory-custom-attributes": {}}
+	for _, args := range [][]string{
+		{"story", "comment", "246", "--body", "abc\u202eevil \u2066x\U000e0041"},
+		{"story", "create", "--subject", "abc\u202eevil \u2066x\U000e0041"},
+		{"field", "create", "--kind", "story", "--name", "abc\u202eevil \u2066x\U000e0041", "--type", "text"},
+	} {
+		out, stderr, code := runIn(t, f.env(), "", append(args, "--dry-run", "--output", "text")...)
+		if code != 0 || strings.ContainsAny(out, "\u202e\u2066\U000e0041") || !strings.Contains(out, `abc\u202eevil \u2066x\udb40\udc41`) {
+			t.Fatalf("%v: %d %s %s", args, code, out, stderr)
+		}
 	}
 }
 
@@ -304,5 +357,14 @@ func TestStoryCommentVersionRefusalIsNotRetried(t *testing.T) {
 	_, stderr, code = runIn(t, f.env(), "", "story", "comment", "246", "--body", "novo")
 	if code != 6 || len(writes(calls)) != 1 || strings.Contains(stderr, "history") {
 		t.Fatalf("%d %s", code, stderr)
+	}
+}
+
+func TestStoryFieldTextEscapesFormatCharacters(t *testing.T) {
+	f, _ := fieldFake(t)
+	f.values[values6808]["attributes_values"] = map[string]any{"29": "abc\u202eevil"}
+	out, stderr, code := runIn(t, f.env(), "", "story", "field", "list", "246", "--output", "text")
+	if code != 0 || strings.Contains(out, "\u202e") || !strings.Contains(out, `"abc\u202eevil"`) {
+		t.Fatalf("%d %s %s", code, out, stderr)
 	}
 }

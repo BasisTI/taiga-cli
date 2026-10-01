@@ -3,8 +3,13 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"net"
+	"net/url"
 	"os"
 	"testing"
+
+	"github.com/BasisTI/taiga-cli/internal/taiga"
 )
 
 const gitlabUser = "gitlab-75a8ccb9ff104f85988c6be846d37aa5"
@@ -84,5 +89,28 @@ func TestSystemCommentConservative(t *testing.T) {
 	}
 	if SystemComment(Object{"comment": mention}) || SystemComment(Object{"user": "x", "comment": mention}) {
 		t.Fatal("entry without a user object hidden")
+	}
+}
+
+// Only a connection that never opened proves that nothing reached Taiga.
+func TestNotSent(t *testing.T) {
+	wrap := func(err error) error {
+		return &taiga.NetworkError{Method: "PATCH", Path: "userstories/1", Err: &url.Error{Op: "Patch", URL: "http://x", Err: err}}
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"refused", wrap(&net.OpError{Op: "dial", Err: errors.New("connection refused")}), true},
+		{"dns", wrap(&net.DNSError{Err: "no such host", Name: "x"}), true},
+		{"reset while reading", wrap(&net.OpError{Op: "read", Err: errors.New("connection reset")}), false},
+		{"timeout", wrap(errors.New("context deadline exceeded")), false},
+		{"5xx", &taiga.APIError{Status: 503, Method: "PATCH", Path: "userstories/1"}, false},
+		{"dial outside a network error", &net.OpError{Op: "dial", Err: errors.New("x")}, false},
+	} {
+		if got := notSent(tc.err); got != tc.want {
+			t.Fatalf("%s: %v", tc.name, got)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -103,8 +104,9 @@ func (s *Service) Comments(ctx context.Context, ref string, includeSystem bool) 
 // Comment publishes body on a story with PATCH {comment, version} and returns the story read
 // again. Taiga's OCC never refuses a comment (it is not a field of the story, so an old version
 // is accepted; docs/api-notes.md), so the version protects nothing and the PATCH is sent once,
-// never repeated. When its outcome is unknown (network error or 5xx), the history says whether
-// the comment landed: the CLI compares our comments with this exact text before and after.
+// never repeated. When its outcome is unknown (network error after the connection opened, or
+// 5xx), the CLI compares our comments with this exact text in the history before and after: a
+// new one means published; otherwise the outcome stays unknown (comment_unconfirmed, exit 1).
 func (s *Service) Comment(ctx context.Context, ref, body string, dry bool) (any, error) {
 	if strings.TrimSpace(body) == "" {
 		return nil, Usage("comment body must not be blank")
@@ -130,7 +132,7 @@ func (s *Service) Comment(ctx context.Context, ref, body string, dry bool) (any,
 	}
 	resp, err := confirmed(s.API.Do(ctx, taiga.Request{Method: "PATCH", Path: path, Body: map[string]any{"comment": body, "version": story["version"]}}))
 	if err != nil {
-		if !unknownOutcome(err) {
+		if notSent(err) || !unknownOutcome(err) {
 			var ae *taiga.APIError
 			if errors.As(err, &ae) && ae.IsVersionConflict() {
 				err = &taiga.ConflictError{Method: "PATCH", Path: path, Fields: []string{"comment"}}
@@ -165,6 +167,18 @@ func unknownOutcome(err error) bool {
 	return errors.As(err, &ne) || errors.As(err, &ae) && ae.Status >= 500
 }
 
+// notSent is a network error raised before the request could leave: the connection was
+// never opened (DNS failure, refused or unreachable). Nothing reached Taiga.
+func notSent(err error) bool {
+	var ne *taiga.NetworkError
+	if !errors.As(err, &ne) {
+		return false
+	}
+	var dns *net.DNSError
+	var op *net.OpError
+	return errors.As(err, &dns) || errors.As(err, &op) && op.Op == "dial"
+}
+
 // ownComments returns the ids of the comments of me with exactly body.
 func (s *Service) ownComments(ctx context.Context, story, me Object, body string) (map[string]bool, error) {
 	entries, err := s.history(ctx, story)
@@ -182,24 +196,26 @@ func (s *Service) ownComments(ctx context.Context, story, me Object, body string
 }
 
 // findComment looks in the history for the comment of a PATCH whose outcome is unknown. Found:
-// nil, the comment is published. Not found: the PATCH error, saying so. History unreadable:
-// comment_unconfirmed, exit 1, so that scripts retrying network errors do not publish twice.
+// nil, the comment is published. Otherwise comment_unconfirmed, exit 1: a missing comment does
+// not prove the PATCH failed, because a request still running on the server (a gateway timeout,
+// a client timeout) can land after the check. A repeatable exit 7 would let scripts that retry
+// network errors publish twice.
 func (s *Service) findComment(ctx context.Context, story, me Object, body string, before map[string]bool, path string, sendErr error) error {
 	after, err := s.ownComments(ctx, story, me, body)
+	var checked string
 	if err != nil {
 		read := output.AsError(err)
-		return &output.Error{Code: "comment_unconfirmed", Source: read.Source, Stage: "PATCH " + path,
-			Cause:    fmt.Sprintf("the comment may have been published: PATCH %s failed (%v) and the history could not be read to check: %s", path, sendErr, read.Error()),
-			Recovery: fmt.Sprintf("do not re-run the command blindly: check with `taiga story comments %v` and publish again only if the comment is missing", story["ref"]),
-			Exit:     output.ExitUnexpected}
-	}
-	for id := range after {
-		if !before[id] {
-			return nil
+		checked = "the history could not be read to check: " + read.Error()
+	} else {
+		for id := range after {
+			if !before[id] {
+				return nil
+			}
 		}
+		checked = "the comment is not in the history yet, but the request may still be running on the server"
 	}
-	e := output.AsError(taiga.ToOutput(sendErr))
-	e.Cause += "; the comment was not in the history right after the failure"
-	e.Recovery = fmt.Sprintf("check with `taiga story comments %v` before publishing again: a request still running on the server can land later", story["ref"])
-	return e
+	return &output.Error{Code: "comment_unconfirmed", Source: output.AsError(taiga.ToOutput(sendErr)).Source, Stage: "PATCH " + path,
+		Cause:    fmt.Sprintf("the comment may have been published: PATCH %s failed (%v) and %s", path, sendErr, checked),
+		Recovery: fmt.Sprintf("do not re-run the command blindly: wait, check with `taiga story comments %v` and publish again only if the comment is still missing", story["ref"]),
+		Exit:     output.ExitUnexpected}
 }
