@@ -66,10 +66,12 @@ taiga field create --kind story --name "Testado em staging" --type checkbox
 taiga field create --kind task --name "Horas" --type text --description "estimativa"
 taiga story field list 246
 taiga story field set 246 "Testado em staging=true" "Data de entrega=2026-10-15" "Notas=texto com = no meio"
+taiga story field set 246 --unset "Testado em staging" --unset "Data de entrega"
 ```
 
 - `field create` pode ser repetido: se já existe definição com o mesmo nome (sensível a maiúsculas) e o mesmo tipo, ela é devolvida sem alteração; com outro tipo, ou outra descrição quando `--description` é informado, sai `field_definition_conflict` (exit 2). A CLI nunca altera nem apaga definições.
-- Tipos aceitos por enquanto: `text`, `date` (`AAAA-MM-DD`) e `checkbox` (`true`/`false`). O nome vai até o primeiro `=`; o texto `null` é gravado como texto. Ainda não há como limpar um campo.
+- Tipos aceitos por enquanto: `text`, `date` (`AAAA-MM-DD`) e `checkbox` (`true`/`false`). O nome vai até o primeiro `=`; o texto `null` é gravado como texto.
+- `--unset NOME` (repetível, nome ou id) limpa um campo `checkbox` ou `date`: o Taiga guarda `null` na chave do campo, que continua no dicionário mesmo quando é o último (o Taiga recusa dicionário vazio). Campo sem valor, ou já `null`, não gera escrita. Campo `text` não se limpa (erro de uso); para esvaziar, `"Notas="`. No JSON o valor limpo aparece como `null`; no texto, vazio, como campo sem valor.
 - `story field set` junta os campos informados aos atuais e grava o dicionário inteiro com o `version` do recurso de valores, que é outro, independente do `version` da story. `story get` mostra os dois: o da story no topo e o dos valores em `custom_attributes`.
 - O Taiga não recusa `version` antigo nos valores de campos customizados. A CLI confere a resposta: se outra gravação caiu junto da nossa, sai `field_values_postcondition_failed` (exit 4) e a alteração **foi gravada**; confira com `taiga story field list` antes de repetir.
 - Campos de task: as definições já têm `field list/create --kind task`; o comando de valores de task vem com a #253.

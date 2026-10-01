@@ -130,14 +130,14 @@ func TestIntegrationTaskFieldValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := app.ID(task["id"])
-	plan, err := s.SetFieldValues(ctx, "task", id, []string{name + "=8h"}, true, false)
+	plan, err := s.SetFieldValues(ctx, "task", id, []string{name + "=8h"}, nil, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p, ok := plan.(app.WritePlan); !ok || p.Path != fmt.Sprintf("tasks/custom-attributes-values/%d", id) {
 		t.Fatalf("plan: %+v", plan)
 	}
-	if _, err := s.SetFieldValues(ctx, "task", id, []string{name + "=8h"}, false, false); err != nil {
+	if _, err := s.SetFieldValues(ctx, "task", id, []string{name + "=8h"}, nil, false, false); err != nil {
 		t.Fatal(err)
 	}
 	values, err := s.FieldValues(ctx, "task", id)
@@ -151,6 +151,99 @@ func TestIntegrationTaskFieldValues(t *testing.T) {
 	again := storyJSON(t, env, "", "api", "GET", fmt.Sprintf("tasks/%d", id))
 	if again["version"] != task["version"] {
 		t.Fatalf("the task version moved: %v → %v", task["version"], again["version"])
+	}
+
+	// US #260: the task values service clears a checkbox the same way.
+	check := storyJSON(t, env, "", "field", "create", "--kind", "task", "--name", "Pago "+suffix, "--type", "checkbox")
+	if s, err = app.New(ctx, taiga.New(testtaiga.URL(), taiga.StaticToken{Type: "Bearer", Value: token}), testtaiga.ProjectSlug); err != nil {
+		t.Fatal(err) // a new service: the catalog read above is cached
+	}
+	if _, err := s.SetFieldValues(ctx, "task", id, []string{check["name"].(string) + "=true"}, nil, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetFieldValues(ctx, "task", id, nil, []string{name}, false, false); err == nil {
+		t.Fatal("text unset accepted")
+	}
+	cleared, err := s.SetFieldValues(ctx, "task", id, nil, []string{check["name"].(string)}, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored = cleared.(app.Object)["attributes_values"].(map[string]any)
+	if v, has := stored[fmt.Sprint(check["id"])]; app.ID(cleared.(app.Object)["version"]) != 4 || !has || v != nil || stored[fmt.Sprint(def["id"])] != "8h" {
+		t.Fatalf("task unset: %v", cleared)
+	}
+}
+
+// US #260: --unset stores null and keeps the key, also for the last field; an absent or
+// already null field writes nothing; story get and field list show the null.
+func TestIntegrationStoryFieldUnset(t *testing.T) {
+	token, _ := testtaiga.Login(t, testtaiga.AdminUser, testtaiga.AdminPassword)
+	env := map[string]string{"TAIGA_URL": testtaiga.URL(), "TAIGA_TOKEN": token, "TAIGA_PROJECT": testtaiga.ProjectSlug}
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	names := map[string]string{"text": "Unset notas " + suffix, "date": "Unset entrega " + suffix, "checkbox": "Unset staging " + suffix}
+	ids := map[string]string{}
+	for typ, name := range names {
+		ids[typ] = fmt.Sprint(storyJSON(t, env, "", "field", "create", "--kind", "story", "--name", name, "--type", typ)["id"])
+	}
+	ref := fmt.Sprint(storyJSON(t, env, "", "story", "create", "--subject", "unset "+suffix)["ref"])
+	version := func() any { return storyJSON(t, env, "", "story", "field", "list", ref)["version"] }
+
+	storyJSON(t, env, "", "story", "field", "set", ref, names["checkbox"]+"=true", names["date"]+"=2026-09-30")
+	plan := storyJSON(t, env, "", "story", "field", "set", ref, "--unset", names["date"], "--dry-run")
+	if plan["dry_run"] != true || version() != float64(2) {
+		t.Fatalf("dry-run wrote: %v", plan)
+	}
+	cleared := storyJSON(t, env, "", "story", "field", "set", ref, "--unset", names["date"])
+	want := map[string]any{ids["checkbox"]: true, ids["date"]: nil}
+	if cleared["version"] != float64(3) || !reflect.DeepEqual(cleared["attributes_values"], want) {
+		t.Fatalf("unset date: %v", cleared)
+	}
+	// The last field with a value: the dictionary keeps both keys, with null.
+	cleared = storyJSON(t, env, "", "story", "field", "set", ref, "--unset", names["checkbox"])
+	want[ids["checkbox"]] = nil
+	if cleared["version"] != float64(4) || !reflect.DeepEqual(cleared["attributes_values"], want) {
+		t.Fatalf("unset checkbox: %v", cleared)
+	}
+	listed := storyJSON(t, env, "", "story", "field", "list", ref)
+	for _, f := range listed["fields"].([]any) {
+		field := f.(map[string]any)
+		value, has := field["value"]
+		switch fmt.Sprint(field["id"]) {
+		case ids["date"], ids["checkbox"]:
+			if !has || value != nil {
+				t.Fatalf("cleared field %v: %v", field["name"], field)
+			}
+		case ids["text"]:
+			if has {
+				t.Fatalf("text field without a value: %v", field)
+			}
+		}
+	}
+	ca, _ := storyJSON(t, env, "", "story", "get", ref)["custom_attributes"].(map[string]any)
+	if ca["version"] != float64(4) || !reflect.DeepEqual(ca["attributes_values"], want) {
+		t.Fatalf("story get: %v", ca)
+	}
+	text, _, code := runIn(t, env, "", "story", "field", "list", ref, "--output", "text")
+	if line := lineOf(text, names["checkbox"]+" (checkbox):"); code != 0 || strings.TrimSpace(strings.TrimPrefix(line, names["checkbox"]+" (checkbox):")) != "" {
+		t.Fatalf("text:\n%s", text)
+	}
+
+	// Already null, or never set: nothing is written.
+	if again := storyJSON(t, env, "", "story", "field", "set", ref, "--unset", names["checkbox"]); again["version"] != float64(4) {
+		t.Fatalf("null again wrote: %v", again)
+	}
+	other := fmt.Sprint(storyJSON(t, env, "", "story", "create", "--subject", "unset absent "+suffix)["ref"])
+	if absent := storyJSON(t, env, "", "story", "field", "set", other, "--unset", names["date"]); absent["version"] != float64(1) || len(absent["attributes_values"].(map[string]any)) != 0 {
+		t.Fatalf("absent key wrote: %v", absent)
+	}
+
+	// Text cannot be unset; the text "null" is text, never a cleared value.
+	if _, errOut, code := runIn(t, env, "", "story", "field", "set", ref, "--unset", names["text"]); code != 2 || !strings.Contains(errOut, "only checkbox and date") {
+		t.Fatalf("text unset: %d %s", code, errOut)
+	}
+	written := storyJSON(t, env, "", "story", "field", "set", ref, names["text"]+"=null")
+	if written["version"] != float64(5) || written["attributes_values"].(map[string]any)[ids["text"]] != "null" {
+		t.Fatalf("text null: %v", written)
 	}
 }
 
