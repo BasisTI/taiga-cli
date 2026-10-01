@@ -55,7 +55,8 @@ func indexNames(items []Object, kind string) (map[string]Object, error) {
 }
 
 // caseVariant returns an entry whose name equals name except for case: Taiga accepts both, but
-// a second status or field differing only by case is almost certainly a mistake.
+// a second status or field differing only by case is almost certainly a mistake. It is drift
+// whether or not the exact name also exists.
 func caseVariant(items []Object, name string) Object {
 	for _, item := range items {
 		if other := fmt.Sprint(item["name"]); other != name && strings.EqualFold(other, name) {
@@ -98,7 +99,7 @@ func BuildProjectPlan(spec ProjectSpec, statuses, fields []Object) (ProjectPlan,
 			projected = append(projected, st.Name)
 		}
 		switch {
-		case !found && caseVariant(statuses, st.Name) != nil:
+		case caseVariant(statuses, st.Name) != nil:
 			plan.Drift = append(plan.Drift, drift("status", st.Name, caseVariant(statuses, st.Name), body, []string{"name"}))
 		case !found:
 			plan.Actions = append(plan.Actions, Action{"create_status", st.Name, body})
@@ -120,7 +121,7 @@ func BuildProjectPlan(spec ProjectSpec, statuses, fields []Object) (ProjectPlan,
 		body := Object{"name": f.Name, "type": f.Type, "description": f.Description}
 		old, found := fs[f.Name]
 		switch {
-		case !found && caseVariant(fields, f.Name) != nil:
+		case caseVariant(fields, f.Name) != nil:
 			plan.Drift = append(plan.Drift, drift("field", f.Name, caseVariant(fields, f.Name), body, []string{"name"}))
 		case !found:
 			plan.Actions = append(plan.Actions, Action{"create_field", f.Name, body})

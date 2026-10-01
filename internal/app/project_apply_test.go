@@ -180,6 +180,7 @@ type statusAPI struct {
 	statuses    []Object
 	fields      []Object
 	posts       []taiga.Request
+	fieldPosts  []taiga.Request
 	postErr     error
 	created     bool // postErr comes after the status was created
 }
@@ -192,6 +193,22 @@ func (a *statusAPI) Do(_ context.Context, r taiga.Request) (*taiga.Response, err
 		for _, st := range a.statuses {
 			if fmt.Sprintf("userstory-statuses/%v", st["id"]) == r.Path {
 				b, _ := json.Marshal(st)
+				return &taiga.Response{Status: 200, Body: b}, nil
+			}
+		}
+	case r.Method == "POST" && r.Path == "userstory-custom-attributes":
+		a.fieldPosts = append(a.fieldPosts, r)
+		f := Object{"id": 80 + len(a.fieldPosts), "project": 37}
+		for k, v := range r.Body.(Object) {
+			f[k] = v
+		}
+		a.fields = append(a.fields, f)
+		b, _ := json.Marshal(f)
+		return &taiga.Response{Status: 201, Body: b}, nil
+	case r.Method == "GET" && strings.HasPrefix(r.Path, "userstory-custom-attributes/"):
+		for _, f := range a.fields {
+			if fmt.Sprintf("userstory-custom-attributes/%v", f["id"]) == r.Path {
+				b, _ := json.Marshal(f)
 				return &taiga.Response{Status: 200, Body: b}, nil
 			}
 		}
@@ -329,5 +346,73 @@ func TestApplyProjectAgainstTheHTTPWriter(t *testing.T) {
 	got, err = s.ApplyProject(context.Background(), spec, false)
 	if exitOf(err) != 2 || len(a.posts) != 1 || got.Complete {
 		t.Fatalf("reorder: %+v %v", got, err)
+	}
+}
+
+func TestStatusWriterCreateFieldRereadsTheCatalog(t *testing.T) {
+	desired := Object{"name": "ReviewRace", "type": "text", "description": ""}
+	a := &statusAPI{}
+	w := statusWriter(a)
+	if _, _, err := w.Load(context.Background()); err != nil { // caches an empty field catalog
+		t.Fatal(err)
+	}
+	// Another client creates a case variant after the preflight.
+	a.fields = append(a.fields, Object{"id": 70, "name": "reviewrace", "type": "text", "description": "", "project": 37})
+	if err := w.CreateField(context.Background(), desired); exitOf(err) != 4 || !strings.Contains(fmt.Sprint(err), "project_changed") || len(a.fieldPosts) != 0 {
+		t.Fatalf("case variant: %v %d", err, len(a.fieldPosts))
+	}
+	// The same name with another type appeared: changed, no POST.
+	a.fields = []Object{{"id": 71, "name": "ReviewRace", "type": "date", "description": "", "project": 37}}
+	if err := w.CreateField(context.Background(), desired); exitOf(err) != 4 || len(a.fieldPosts) != 0 {
+		t.Fatalf("other type: %v %d", err, len(a.fieldPosts))
+	}
+	// An equal one appeared: no-op. Missing: created once.
+	a.fields = []Object{{"id": 72, "name": "ReviewRace", "type": "text", "description": "", "project": 37}}
+	if err := w.CreateField(context.Background(), desired); err != nil || len(a.fieldPosts) != 0 {
+		t.Fatalf("equal: %v %d", err, len(a.fieldPosts))
+	}
+	a.fields = nil
+	if err := w.CreateField(context.Background(), desired); err != nil || len(a.fieldPosts) != 1 {
+		t.Fatalf("create: %v %d", err, len(a.fieldPosts))
+	}
+}
+
+func TestStatusWriterCreateStatusRefusesAVariantNextToTheExactName(t *testing.T) {
+	a := &statusAPI{statuses: append(remoteStatuses(),
+		Object{"id": 60, "name": "X", "order": 6, "color": "#000000", "is_closed": false},
+		Object{"id": 61, "name": "x", "order": 7, "color": "#000000", "is_closed": false})}
+	err := statusWriter(a).CreateStatus(context.Background(), Object{"name": "X", "color": "#000000", "is_closed": false})
+	if exitOf(err) != 4 || len(a.posts) != 0 {
+		t.Fatalf("%v %d", err, len(a.posts))
+	}
+}
+
+func TestBuildProjectPlanCaseVariantNextToTheExactName(t *testing.T) {
+	fields := append(remoteFields(), Object{"id": 12, "name": "executor", "type": "text", "description": "who"})
+	plan, err := BuildProjectPlan(ProjectSpec{StoryField: []FieldSpec{{Name: "Executor", Type: "text", Description: "who"}}}, remoteStatuses(), fields)
+	if err != nil || len(plan.Drift) != 1 || len(plan.Actions) != 0 {
+		t.Fatalf("field: %+v %v", plan, err)
+	}
+	statuses := append(remoteStatuses(), Object{"id": 12, "name": "NEW", "order": 9, "color": "#70728F", "is_closed": false})
+	plan, err = BuildProjectPlan(ProjectSpec{StoryStatus: []StatusSpec{{Name: "New", Color: "#70728F"}}}, statuses, nil)
+	if err != nil || len(plan.Drift) != 1 {
+		t.Fatalf("status: %+v %v", plan, err)
+	}
+}
+
+// fieldRaceFake: while the status is created, another client creates a case variant of the field.
+type fieldRaceFake struct{ applyFake }
+
+func (f *fieldRaceFake) CreateStatus(ctx context.Context, body Object) error {
+	f.fields = append(f.fields, Object{"id": 70, "name": "reviewrace", "type": "text", "description": ""})
+	return f.applyFake.CreateStatus(ctx, body)
+}
+
+func TestApplyIsNotCompleteWithACaseCollision(t *testing.T) {
+	spec := ProjectSpec{StoryStatus: []StatusSpec{{Name: "ReviewTrigger", Color: "#000000"}}, StoryField: []FieldSpec{{Name: "ReviewRace", Type: "text"}}}
+	f := &fieldRaceFake{applyFake{statuses: remoteStatuses()}}
+	got, err := Apply(context.Background(), f, spec, false)
+	if exitOf(err) != 4 || got.Complete {
+		t.Fatalf("%+v %v", got, err)
 	}
 }

@@ -234,3 +234,27 @@ func TestIntegrationProjectApplyConcurrentStatus(t *testing.T) {
 		t.Fatalf("the other writer's status was not kept: %s", got)
 	}
 }
+
+// The review case: another client creates a field differing only by case while apply creates a
+// status, after the preflight. Apply must stop before creating its field, not end complete.
+func TestIntegrationProjectApplyConcurrentFieldCase(t *testing.T) {
+	env, _, pid := freshProject(t, "cli-test-apply-field-race-"+fmt.Sprint(time.Now().UnixNano()))
+	toml := "[[story_status]]\nname = \"ReviewTrigger\"\ncolor = \"#000000\"\n[[story_field]]\nname = \"ReviewRace\"\ntype = \"text\"\n"
+	raced := false
+	url := proxy(t, func(_ http.ResponseWriter, r *http.Request, _ []byte) bool {
+		if r.Method == "POST" && r.URL.Path == "/api/v1/userstory-statuses" && !raced {
+			raced = true
+			storyJSON(t, env, "", "api", "POST", "userstory-custom-attributes", "-F", "project="+pid, "-f", "name=reviewrace", "-f", "type=text")
+		}
+		return false
+	})
+	proxied := map[string]string{"TAIGA_URL": url, "TAIGA_TOKEN": env["TAIGA_TOKEN"], "TAIGA_PROJECT": env["TAIGA_PROJECT"]}
+	out, errOut, code := runIn(t, proxied, toml, "project", "apply", "-f", "-")
+	r := applyResult(t, out)
+	if code != 4 || !raced || r["complete"] != false || !strings.Contains(errOut, "project_changed") || len(r["applied"].([]any)) != 1 {
+		t.Fatalf("exit %d: %s %s", code, errOut, out)
+	}
+	if got := fieldNames(t, env); got != "reviewrace/text" {
+		t.Fatalf("fields: %s", got)
+	}
+}

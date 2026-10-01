@@ -86,8 +86,11 @@ func (w *statusHTTPWriter) CheckReorderSupport(context.Context) error {
 }
 
 // changedStatus reports a status that appeared or changed between the plan and a write.
-func changedStatus(name string) error {
-	return &output.Error{Code: "project_changed", Cause: fmt.Sprintf("status %q changed in Taiga during apply", name),
+func changedStatus(name string) error { return changed("status", name) }
+
+// changed reports a definition of kind that appeared or changed between the plan and a write.
+func changed(kind, name string) error {
+	return &output.Error{Code: "project_changed", Cause: fmt.Sprintf("%s %q changed in Taiga during apply", kind, name),
 		Recovery: "run `taiga project plan` again and review it before applying", Exit: output.ExitConflict}
 }
 
@@ -103,11 +106,11 @@ func (w *statusHTTPWriter) existingStatus(ctx context.Context, desired Object) (
 		return nil, nil, err
 	}
 	name := fmt.Sprint(desired["name"])
+	if caseVariant(statuses, name) != nil {
+		return nil, nil, changedStatus(name)
+	}
 	st, found := index[name]
 	if !found {
-		if caseVariant(statuses, name) != nil {
-			return nil, nil, changedStatus(name)
-		}
 		return nil, statuses, nil
 	}
 	color, _ := st["color"].(string)
@@ -163,10 +166,30 @@ func (w *statusHTTPWriter) CreateStatus(ctx context.Context, desired Object) err
 	return nil
 }
 
-// CreateField reuses field create: an equal definition is a no-op, a different one an error.
+// CreateField re-reads the story fields, bypassing the run cache, and refuses a definition that
+// appeared since the plan with another type or description, or with the name in another case.
+// An equal one is a no-op; otherwise field create does the POST, never repeated.
 func (w *statusHTTPWriter) CreateField(ctx context.Context, desired Object) error {
-	description := fmt.Sprint(desired["description"])
-	_, err := w.service.CreateField(ctx, "story", fmt.Sprint(desired["name"]), fmt.Sprint(desired["type"]), &description, false)
+	name, description := fmt.Sprint(desired["name"]), fmt.Sprint(desired["description"])
+	delete(w.service.catalogs, "userstory-custom-attributes")
+	fields, err := w.service.Fields(ctx, "story")
+	if err != nil {
+		return err
+	}
+	index, err := indexNames(fields, "field")
+	if err != nil {
+		return err
+	}
+	if caseVariant(fields, name) != nil {
+		return changed("field", name)
+	}
+	if f, found := index[name]; found {
+		if f["type"] != desired["type"] || fmt.Sprint(f["description"]) != description {
+			return changed("field", name)
+		}
+		return nil
+	}
+	_, err = w.service.CreateField(ctx, "story", name, fmt.Sprint(desired["type"]), &description, false)
 	return err
 }
 
