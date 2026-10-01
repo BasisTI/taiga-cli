@@ -1,0 +1,55 @@
+# Exemplo de configuração de projeto para `taiga project plan|apply -f`.
+#
+# Reproduz o que o configurar-taiga-projeto.sh da skill basis-ci-gitlab prepara: os status
+# opcionais do fluxo da story e os campos de registro de início e de teste. Nomes, cores e
+# descrições são exemplo, não valores embutidos na CLI: confirme a convenção do seu projeto.
+#
+# - Nada é removido nem alterado: status e campos fora do arquivo ficam como estão, e um
+#   declarado que já existe com outra cor, outro `closed`, outro tipo ou outra descrição é
+#   "drift" — o plan mostra, o apply recusa (exit 2).
+# - `after` posiciona o status depois de outro. Quando isso exige mover status, o apply grava a
+#   ordem inteira numa requisição só, conferindo a ordem antes e depois: o Taiga 6.7 não tem
+#   controle de concorrência na ordem (ver docs/api-notes.md), então a conferência detecta parte
+#   das corridas, não impede. Sem `after`, o status novo é criado no fim do board.
+
+[[story_status]]
+name = "In revision"
+color = "#5178D3"
+closed = false
+after = "In progress"
+
+[[story_status]]
+name = "Waiting for deployment"
+color = "#40A8E4"
+closed = false
+after = "Ready for test"
+
+[[story_field]]
+name = "Início da implementação"
+type = "date"
+description = "Registro de início: data em que o executor começou de fato (a hora exata fica no histórico da story)"
+
+[[story_field]]
+name = "Executor"
+type = "text"
+description = "Registro de início: agente + modelo, ou pessoa"
+
+[[story_field]]
+name = "Worktree"
+type = "text"
+description = "Registro de início: branch TG-xxx e caminho do worktree"
+
+[[story_field]]
+name = "Testado em staging"
+type = "checkbox"
+description = "Registro de teste: a versão atual foi testada em staging"
+
+[[story_field]]
+name = "Testado por"
+type = "text"
+description = "Registro de teste: quem testou"
+
+[[story_field]]
+name = "Data do teste"
+type = "date"
+description = "Registro de teste: data do teste em staging"

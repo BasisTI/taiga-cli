@@ -76,6 +76,45 @@ taiga story field set 246 --unset "Testado em staging" --unset "Data de entrega"
 - O Taiga não recusa `version` antigo nos valores de campos customizados. A CLI confere a resposta: se outra gravação caiu junto da nossa, sai `field_values_postcondition_failed` (exit 4) e a alteração **foi gravada**; confira com `taiga story field list` antes de repetir.
 - Campos de task: as definições já têm `field list/create --kind task`; o comando de valores de task vem com a #253.
 
+## Status e campos do projeto como código
+
+Substitui o `configurar-taiga-projeto.sh` da skill basis-ci-gitlab. O arquivo TOML declara status de story e campos
+customizados de story; [docs/examples/taiga-project.toml](examples/taiga-project.toml) traz o equivalente ao script
+(`In revision`, `Waiting for deployment` e os seis campos de registro). Nomes, cores e descrições do exemplo são
+exemplo, não configuração embutida na CLI.
+
+```sh
+taiga status list --output text
+taiga project plan -f taiga-project.toml          # só lê; qualquer membro roda
+taiga project apply -f taiga-project.toml --dry-run
+taiga project apply -f taiga-project.toml          # exige admin do projeto
+```
+
+- Só o que o arquivo declara é gerenciado, e nada é alterado nem apagado. O que existe e não está no arquivo aparece
+  em `unmanaged` e fica como está. Declarado que já existe com outra cor, outro `closed`, outro tipo ou outra
+  descrição — ou com nome igual a menos de maiúsculas — é `drift`: o `plan` mostra e o `apply` recusa
+  (`definition_drift`, exit 2) antes de gravar. Quem decide é você: corrigir o arquivo ou o projeto.
+- Nome é sensível a maiúsculas (o script comparava sem diferenciar; agora a diferença só de caixa vira drift, em vez
+  de virar um segundo status).
+- Status novo entra depois do último, na ordem do arquivo. `after` põe o status depois de outro (existente ou do
+  próprio arquivo); ciclo, autorreferência e status inexistente são erro de uso. Quando o `after` exige mover status,
+  o `apply` grava a ordem inteira no fim, numa única requisição `bulk_update_order` — é o caso do exemplo
+  (`In revision` depois de `In progress`).
+- **Reordenação conferida, não protegida.** O Taiga 6.7 não tem controle de concorrência na ordem dos status (não há
+  `version`; ver `docs/api-notes.md`). Por decisão de 2026-10-01 ("aceitar com conferência"), o `apply` relê a ordem
+  logo antes de gravar e recusa se algo mudou desde o plano (`project_changed`, exit 4, nada enviado); logo depois,
+  relê e exige a ordem pretendida, ou sai `status_order_postcondition_failed` (exit 4): a ordem **foi gravada** e
+  outra mudança caiu junto — confira com `taiga status list` em vez de repetir. Detecta parte das corridas, não
+  impede: uma mudança entre a última leitura e a escrita pode ser sobrescrita. Nunca há repetição automática.
+- Dois status ou dois campos do arquivo com nomes iguais a menos de maiúsculas são recusados antes de qualquer
+  leitura. Antes de cada criação o catálogo é relido; status ou campo que apareceu com outros valores, ou com o nome
+  em outra caixa, interrompe com `project_changed`.
+- O `apply` confere `admin_project_values` antes de tudo, inclusive no `--dry-run` (`forbidden`, exit 6). A conta de
+  serviço normalmente não tem: rode com a de um admin do projeto.
+- Falha no meio: o resultado (`applied`, `remaining`, `complete: false`) sai no stdout e o erro no stderr; nada é
+  desfeito nem repetido. Rodar de novo relê o projeto e continua sem duplicar. `complete: true` só depois de uma
+  releitura sem pendências; se o projeto mudou durante o apply, sai `project_changed` (exit 4).
+
 ## `taiga api` para o que ainda não tem comando próprio
 
 Enquanto os comandos curados das próximas fases não chegam, `taiga api` cobre as receitas que hoje estão na skill `basis-ci-gitlab`. O caminho é relativo a `/api/v1/`, e `--auto-version` lê o `version` atual antes de gravar.
