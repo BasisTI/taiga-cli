@@ -42,6 +42,9 @@ taiga story update 246 --append-description "Entregue em staging."
 taiga story update 247 --add-assignee me --add-assignee fulano --block "aguardando revisão da B6"
 taiga story update 247 --remove-assignee fulano --unblock
 taiga story close 246 --status Done
+taiga story comment 246 --body-file nota.md
+echo "Entregue em staging." | taiga story comment 246 --body-file -
+taiga story comments 246 --output text
 ```
 
 - Toda escrita aceita `--dry-run`, que mostra método, caminho e corpo sem gravar. O `update` envia só os campos que mudam, com o `version` lido; se outra pessoa mudou os mesmos campos no meio, a CLI para com `version_conflict` (exit 4).
@@ -51,6 +54,8 @@ taiga story close 246 --status Done
 - O controle de concorrência do Taiga não cobre o responsável principal (`assigned_to`). Por isso a CLI relê os responsáveis logo antes de gravar e confere a story depois. Se o resultado não bate com o pedido, sai `assignees_postcondition_failed` (exit 4): a alteração **foi gravada**, então confira com `taiga story get` em vez de repetir o comando. Uma troca concorrente na janela curta entre essa releitura e a gravação é detectada, mas não evitada (detalhes em `docs/api-notes.md`).
 - Bloqueio: `--block "nota"` bloqueia com a nota (obrigatória); `--unblock` desbloqueia e limpa a nota.
 - `close` só muda o status para um status fechado: não arquiva nem exclui. No template padrão há dois status fechados (`Done` e `Archived`), então informe `--status`.
+- Comentário: `story comment` publica o texto exatamente como veio (`--body`, ou `--body-file` com arquivo ou `-` para stdin), sem mexer na descrição; texto em branco é recusado. O Taiga aceita qualquer `version` antigo para comentário, então não há `--force-version` e o comentário é enviado uma vez só, nunca repetido. Se a resposta se perde (rede ou 5xx), a CLI procura o comentário no histórico: achou, sucesso; não achou ou não conseguiu ler, `comment_unconfirmed` (exit 1), porque o servidor pode gravar depois. Nesse caso, espere e confira com `taiga story comments` antes de publicar de novo. Exit 7 (`network_error`) só quando a conexão nem abriu: nada foi enviado.
+- `story comments` lista do mais novo para o mais antigo, inclusive comentários editados e apagados (`edit_comment_date`, `delete_comment_date`). Os comentários automáticos da integração GitLab do Taiga (usuário de sistema `gitlab-<hash>`, inativo, com os textos do push hook) ficam ocultos; `--include-system` os mostra. Comentários da conta de integração dos agentes são humanos e sempre aparecem.
 - Vincular story a épico (`--epic`) ainda não é suportado: o Taiga faz o vínculo por um recurso à parte, sem `version`, e trocar o vínculo exige `DELETE`. Use a interface web por enquanto.
 
 ## Campos customizados
@@ -74,9 +79,6 @@ taiga story field set 246 "Testado em staging=true" "Data de entrega=2026-10-15"
 Enquanto os comandos curados das próximas fases não chegam, `taiga api` cobre as receitas que hoje estão na skill `basis-ci-gitlab`. O caminho é relativo a `/api/v1/`, e `--auto-version` lê o `version` atual antes de gravar.
 
 ```sh
-# comentário na story (o texto vai para a API como JSON válido, com acentos e quebras de linha)
-taiga api PATCH userstories/<id> --raw-field comment="$(cat nota.md)" --auto-version
-
 # bloquear com motivo
 taiga api PATCH userstories/<id> --field is_blocked=true --raw-field blocked_note="aguarda B6" --auto-version
 

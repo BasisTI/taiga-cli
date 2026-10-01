@@ -14,7 +14,8 @@ Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 202
 | Paginação | `?page=N`; o próximo vem em `X-Pagination-Next` | sondagem manual da US #245 |
 | Application tokens para conta de serviço | não validado na fase 1: exige cadastrar uma Application pelo admin do Django; fica para quando houver demanda | — |
 | `userstories/by_ref?ref=&project=` | validado na fase 2; ver seção abaixo | `TestProbeStoryByRef` |
-| Escrita de swimlane, upload de anexo, comentários no histórico | fases 2 e 3 | — |
+| Escrita de swimlane, upload de anexo | fases 2 e 3 | — |
+| Comentários (`PATCH {comment, version}`, `history/userstory`, integração GitLab) | validado na fase 2; ver "comentários" | `TestProbeCommentContract`, `TestProbeCommentHistoryPages`, `TestIntegrationStoryComments` |
 | Relação `assigned_to` × `assigned_users`, bloqueio | validado na fase 2; ver "responsáveis e bloqueio" | `TestProbeStoryAssignees`, `TestProbeStoryBlock` |
 | Campos customizados (definições e valores) de story e task | validado na fase 2; ver "campos customizados" | `TestProbeFieldDefinitions`, `TestProbeFieldValues`, `TestProbeTaskFieldValues` |
 
@@ -275,3 +276,81 @@ Consequências na CLI (`story field set`, e o serviço de valores de task):
 - como o servidor não valida valores, a CLI valida: `checkbox` só `true`/`false`, `date` só `AAAA-MM-DD` válida.
   Não há sintaxe para limpar campo (`null`); o texto `null` continua texto. O Taiga aceita `null` em date/checkbox,
   mas a sintaxe de unset é decisão humana (plano, "Pontos a validar").
+
+
+## Fase 2 — comentários (US #250)
+
+Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 2026-10-01, com `admin` e `svc` (membro)
+no projeto descartável `cli-test-probe-comments`. Testes em `internal/taiga/comments_probe_integration_test.go`
+(`go test -tags integration -run '^TestProbeComment' -v ./internal/taiga`) e
+`internal/cli/comments_integration_test.go`. Código lido no container: `taiga/projects/history/api.py` e
+`serializers.py`, `taiga/hooks/event_hooks.py`, `taiga/hooks/gitlab/` (`api.py`, `event_hooks.py`,
+`migrations/0001_initial.py`).
+
+### Publicação: `PATCH userstories/<id> {comment, version}`
+
+| Requisição | Resultado |
+|---|---|
+| `comment` + `version` atual | 200; a `version` da story sobe 1; a resposta traz `comment: ""` (o texto não volta na story) |
+| `comment` + `version` **antiga** (inclusive 1, depois de outras escritas) | **aceito (200)**: o OCC compara as chaves enviadas com as chaves do `diff` do histórico (ver "OCC por campo"), e `comment` nunca é chave de `diff` |
+| `comment` sem `version`, ou com `version` maior que a atual | 400 `{"version": "The version parameter is not valid"}` |
+| `comment: "   "` (só espaços) | aceito e gravado como entrada de comentário |
+| aspas, acentos, quebras de linha, Markdown | gravados como enviados; `comment_html` renderizado pelo servidor |
+| membro sem admin (`svc`) | publica; o autor da entrada é `svc` |
+
+Consequências na CLI (`story comment`):
+
+- a `version` não protege nada: não há conflito possível, nem `--force-version`. A CLI envia a `version` lida (o
+  servidor exige uma válida) e nunca repete o `PATCH`;
+- texto em branco é recusado antes da autenticação (o servidor gravaria a entrada);
+- texto que não é UTF-8 válido é recusado (exit 2): o encoder JSON trocaria os bytes por U+FFFD, o texto gravado não
+  bateria com o enviado e a conferência no histórico não acharia o comentário publicado;
+- a listagem mostra também o comentário só de espaços, que o Taiga gravou como comentário (só a integração GitLab é
+  ocultada);
+- resposta 2xx ilegível (`UnreadableBodyError`, corpo truncado) segue o caminho de releitura das outras escritas: o
+  status já confirma a gravação; se a releitura falhar, `write_applied`;
+- erro sem resposta conclusiva (rede depois de aberta a conexão, timeout ou 5xx): antes do `PATCH` a CLI guarda os
+  ids dos comentários do próprio usuário (`users/me`) com exatamente o mesmo texto; depois da falha relê o histórico.
+  Um id novo com o texto = publicado (sucesso, story relida). Nenhum, ou histórico ilegível = `comment_unconfirmed`
+  (exit 1): a ausência não prova que o `PATCH` falhou, porque um gateway pode responder 503 enquanto o servidor ainda
+  grava, e o comentário aparece depois da conferência (achado da revisão do PR #7: um script que repetia o exit 7
+  criou duas cópias). O erro de rede original (exit 7, repetível) só sai quando a conexão nem abriu (DNS, conexão
+  recusada).
+
+### Leitura: `GET history/userstory/<id>`
+
+| Ponto | Resultado |
+|---|---|
+| ordem | `-created_at`: **mais novo primeiro**. A CLI preserva a ordem do servidor, sem reordenar por texto de data |
+| paginação | 30 por página por padrão, com `x-pagination-next`; `x-disable-pagination: True` é respeitado (lista inteira). `GetAll` cobre os dois |
+| `?type=comment` | só entradas com `comment` diferente de `""` (inclui o comentário só de espaços); `?type=activity` só `diff` sem comentário. A CLI usa `type=comment` para encurtar e confere o texto localmente |
+| entrada | `id` (UUID), `user` (`pk`, `username`, `name`, `photo`, `is_active`, `gravatar_id`), `created_at`, `type` (1 em todos os casos observados, inclusive comentário só), `key`, `diff`, `values_diff`, `snapshot`, `values`, `comment`, `comment_html`, `edit_comment_date`, `delete_comment_date`, `delete_comment_user`, `is_hidden`, `is_snapshot` |
+| comentário sem alteração | `diff` e `values_diff` vazios; alteração sem comentário: `comment: ""` |
+| `POST history/userstory/<id>/edit_comment?id=<uuid> {comment}` | troca o texto, preenche `edit_comment_date`; **não** muda a `version` da story |
+| `POST history/userstory/<id>/delete_comment?id=<uuid>` | preenche `delete_comment_date`/`delete_comment_user`; o texto **continua** na resposta; não muda a `version` |
+| autor inativo comum | pela leitura do serializer (não sondado): `username` nulo e `name` o gravado na entrada; só usuário ativo ou de sistema (`is_system`) tem o `username` exposto |
+
+A CLI lista comentários editados e apagados (com as datas), porque esconder é decisão que o plano não tomou; a saída
+de texto mostra `edited_at` e `deleted_at`.
+
+### Comentários da integração GitLab
+
+A integração nativa do Taiga (`gitlab-hook`, ativada por `PATCH projects/<id>/modules {"gitlab": {"secret"}}`) grava
+como o usuário de sistema criado na migração: `username` = `gitlab-` + 32 hex (`uuid4().hex`), `name` "GitLab",
+`is_active: false`, `is_system: true`. No push hook o autor do commit nunca é ligado a um usuário do Taiga
+(`user_id: None`), então toda entrada do hook usa esse usuário. Gerado no Taiga local com dois commits:
+
+- menção: `This user story has been mentioned by Dev Exemplo in the [GitLab commit](<url> "See commit '<id> - <msg>'") "<msg>"` (sem `diff`);
+- troca de status (`TG-<ref> #<slug>`): `Dev Exemplo changed the status from [GitLab commit](<url> ...)\n\n  - Status: **New** → **Ready for test**` (com `diff` de `status`).
+
+O registro anterior (memória, 2026-09-29) descreve no Taiga da Basis o mesmo usuário `gitlab-…` e o texto "This user
+story has been mentioned…".
+
+Regra da CLI (`SystemComment`), conservadora: é comentário de sistema só quando **as duas** coisas batem — autor
+`gitlab-<32 hex minúsculos>` com `is_active: false` explícito, **e** texto num dos modelos do hook ("This user story has
+been mentioned by … in the [GitLab commit](", "This issue has been mentioned in the GitLab commit ", "… changed the
+status from [GitLab commit](", "Changed status from GitLab commit."). Não basta `type`, `diff` vazio, conta de serviço
+nem um nome parecido (`gitlab-bot`). Todo o resto, inclusive autor desconhecido, aparece. A fixture
+`internal/app/testdata/history_userstory.json` é o histórico real do Taiga local (fotos e gravatar sanitizados).
+Os modelos passam por tradução (`_()`) no servidor; no Taiga local saíram em inglês. Se uma instância os gravar
+traduzidos, a CLI os deixa visíveis (lado seguro).

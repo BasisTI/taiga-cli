@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/BasisTI/taiga-cli/internal/app"
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -120,18 +119,18 @@ func (a *App) renderStoryFields(ctx context.Context, service *app.Service, story
 	return output.WriteFields(a.Out, lines)
 }
 
-// jsonValue prints plain text as is; empty text, text with control characters (line breaks
-// included) and any other value print as JSON, so each field stays on one line and a stored ""
+// jsonValue prints plain text as is; empty text, text with control or format characters (line
+// breaks and bidi overrides included) and any other value print as JSON, so each field stays on one line and a stored ""
 // differs from a field without value.
 func jsonValue(v any) string {
-	if s, ok := v.(string); ok && s != "" && !strings.ContainsFunc(s, unicode.IsControl) {
+	if s, ok := v.(string); ok && s != "" && !strings.ContainsFunc(s, unsafeRune) {
 		return s
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Sprint(v)
 	}
-	return string(b)
+	return escapeJSON(string(b))
 }
 
 func sortedKeys(m map[string]any) []string {
