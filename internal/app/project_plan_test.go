@@ -34,19 +34,22 @@ description = "Registro de teste da versão entregue"
 
 func TestParseProjectSpecRefusals(t *testing.T) {
 	for name, input := range map[string]string{
-		"unknown key":        "unknown = true",
-		"unknown status key": "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nposition = 1",
-		"bad color":          "[[story_status]]\nname = \"A\"\ncolor = \"red\"",
-		"short color":        "[[story_status]]\nname = \"A\"\ncolor = \"#000\"",
-		"no color":           "[[story_status]]\nname = \"A\"",
-		"empty name":         "[[story_status]]\nname = \" \"\ncolor = \"#000000\"",
-		"self reference":     "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nafter = \"A\"",
-		"duplicate status":   "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\n[[story_status]]\nname = \"A\"\ncolor = \"#000000\"",
-		"duplicate field":    "[[story_field]]\nname = \"F\"\ntype = \"text\"\n[[story_field]]\nname = \"F\"\ntype = \"date\"",
-		"field type":         "[[story_field]]\nname = \"F\"\ntype = \"number\"",
-		"field with =":       "[[story_field]]\nname = \"a=b\"\ntype = \"text\"",
-		"closed as string":   "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nclosed = \"no\"",
-		"not TOML":           "[[story_status]\n",
+		"unknown key":         "unknown = true",
+		"unknown status key":  "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nposition = 1",
+		"bad color":           "[[story_status]]\nname = \"A\"\ncolor = \"red\"",
+		"short color":         "[[story_status]]\nname = \"A\"\ncolor = \"#000\"",
+		"no color":            "[[story_status]]\nname = \"A\"",
+		"empty name":          "[[story_status]]\nname = \" \"\ncolor = \"#000000\"",
+		"self reference":      "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nafter = \"A\"",
+		"duplicate status":    "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\n[[story_status]]\nname = \"A\"\ncolor = \"#000000\"",
+		"duplicate field":     "[[story_field]]\nname = \"F\"\ntype = \"text\"\n[[story_field]]\nname = \"F\"\ntype = \"date\"",
+		"field type":          "[[story_field]]\nname = \"F\"\ntype = \"number\"",
+		"field with =":        "[[story_field]]\nname = \"a=b\"\ntype = \"text\"",
+		"closed as string":    "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nclosed = \"no\"",
+		"not TOML":            "[[story_status]\n",
+		"status case":         "[[story_status]]\nname = \"ReviewCase\"\ncolor = \"#000000\"\n[[story_status]]\nname = \"reviewcase\"\ncolor = \"#000000\"",
+		"status unicode case": "[[story_status]]\nname = \"Ação\"\ncolor = \"#000000\"\n[[story_status]]\nname = \"AÇÃO\"\ncolor = \"#000000\"",
+		"field case":          "[[story_field]]\nname = \"ReviewCase\"\ntype = \"text\"\n[[story_field]]\nname = \"reviewcase\"\ntype = \"text\"",
 	} {
 		if _, err := ParseProjectSpec(strings.NewReader(input)); err == nil || exitOf(err) != 2 {
 			t.Errorf("%s: %v", name, err)
@@ -200,6 +203,17 @@ func TestBuildProjectPlanDrift(t *testing.T) {
 		plan, err := BuildProjectPlan(c.spec, remoteStatuses(), remoteFields())
 		if err != nil || len(plan.Drift) != 1 || len(plan.Actions) != 0 || !reflect.DeepEqual(plan.Drift[0]["fields"], c.fields) {
 			t.Errorf("%s: %+v %v", name, plan, err)
+		}
+	}
+}
+
+func TestBuildProjectPlanRefusesCaseDuplicatesInTheSpec(t *testing.T) {
+	for name, spec := range map[string]ProjectSpec{
+		"statuses": {StoryStatus: []StatusSpec{{Name: "ReviewCase", Color: "#000000"}, {Name: "reviewcase", Color: "#000000"}}},
+		"fields":   {StoryField: []FieldSpec{{Name: "ReviewCase", Type: "text"}, {Name: "REVIEWCASE", Type: "text"}}},
+	} {
+		if _, err := BuildProjectPlan(spec, remoteStatuses(), remoteFields()); err == nil || exitOf(err) != 2 {
+			t.Errorf("%s: %v", name, err)
 		}
 	}
 }

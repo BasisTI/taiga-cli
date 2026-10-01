@@ -112,6 +112,8 @@ func TestProjectApplyRefusalsWriteNothing(t *testing.T) {
 		"cycle":            {"", "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nafter = \"B\"\n[[story_status]]\nname = \"B\"\ncolor = \"#000000\"\nafter = \"A\"\n", 2, "cycle"},
 		"unknown key":      {"", "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nwip = 3\n", 2, "invalid project TOML"},
 		"unknown after":    {"", "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nafter = \"Nope\"\n", 2, "unknown status"},
+		"status case dup":  {"", "[[story_status]]\nname = \"ReviewCase\"\ncolor = \"#000000\"\n[[story_status]]\nname = \"reviewcase\"\ncolor = \"#000000\"\n", 2, "differ only by case"},
+		"field case dup":   {"", "[[story_field]]\nname = \"ReviewCase\"\ntype = \"text\"\n[[story_field]]\nname = \"reviewcase\"\ntype = \"text\"\n", 2, "differ only by case"},
 		"field drift type": {"", "[[story_field]]\nname = \"Executor\"\ntype = \"date\"\ndescription = \"who\"\n", 2, "definition_drift"},
 	} {
 		for _, dry := range []bool{false, true} {

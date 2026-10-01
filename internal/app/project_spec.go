@@ -42,6 +42,9 @@ func ParseProjectSpec(r io.Reader) (ProjectSpec, error) {
 	if err := d.Decode(&spec); err != nil {
 		return spec, Usage("invalid project TOML: " + err.Error())
 	}
+	if err := specDuplicates(spec); err != nil {
+		return spec, err
+	}
 	seen := map[string]bool{}
 	for _, st := range spec.StoryStatus {
 		switch {
@@ -69,6 +72,32 @@ func ParseProjectSpec(r io.Reader) (ProjectSpec, error) {
 		seen[f.Name] = true
 	}
 	return spec, nil
+}
+
+// specDuplicates refuses two declarations whose names differ only by case: Taiga would accept
+// both, and the plan treats a case variant of an existing name as drift.
+func specDuplicates(spec ProjectSpec) error {
+	statuses, fields := []string{}, []string{}
+	for _, st := range spec.StoryStatus {
+		statuses = append(statuses, st.Name)
+	}
+	for _, f := range spec.StoryField {
+		fields = append(fields, f.Name)
+	}
+	for _, c := range []struct {
+		kind  string
+		names []string
+	}{{"status", statuses}, {"field", fields}} {
+		kind, names := c.kind, c.names
+		for i, a := range names {
+			for _, b := range names[i+1:] {
+				if strings.EqualFold(a, b) {
+					return Usage(fmt.Sprintf("duplicate %s: %q and %q differ only by case", kind, a, b))
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // OrderStatuses returns the desired order of every status: current ones (in their order) plus

@@ -69,6 +69,9 @@ func caseVariant(items []Object, name string) Object {
 // field definitions read from Taiga. It never plans an update or a removal.
 func BuildProjectPlan(spec ProjectSpec, statuses, fields []Object) (ProjectPlan, error) {
 	plan := ProjectPlan{Actions: []Action{}, Unmanaged: []Object{}, Drift: []Object{}}
+	if err := specDuplicates(spec); err != nil {
+		return plan, err
+	}
 	sts, err := indexNames(statuses, "status")
 	if err != nil {
 		return plan, err
