@@ -18,6 +18,7 @@ Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 202
 | Comentários (`PATCH {comment, version}`, `history/userstory`, integração GitLab) | validado na fase 2; ver "comentários" | `TestProbeCommentContract`, `TestProbeCommentHistoryPages`, `TestIntegrationStoryComments` |
 | Relação `assigned_to` × `assigned_users`, bloqueio | validado na fase 2; ver "responsáveis e bloqueio" | `TestProbeStoryAssignees`, `TestProbeStoryBlock` |
 | Campos customizados (definições e valores) de story e task | validado na fase 2; ver "campos customizados" | `TestProbeFieldDefinitions`, `TestProbeFieldValues`, `TestProbeTaskFieldValues`, `TestProbeFieldValuesUnset` |
+| Status de story/task, permissão `admin_project_values`, ordem sem OCC | validado na fase 2; ver "status e projeto como código" | `TestProbeStatusContract` |
 
 ## Fase 2 — stories (US #246)
 
@@ -381,3 +382,67 @@ nem um nome parecido (`gitlab-bot`). Todo o resto, inclusive autor desconhecido,
 `internal/app/testdata/history_userstory.json` é o histórico real do Taiga local (fotos e gravatar sanitizados).
 Os modelos passam por tradução (`_()`) no servidor; no Taiga local saíram em inglês. Se uma instância os gravar
 traduzidos, a CLI os deixa visíveis (lado seguro).
+
+## Fase 2 — status e projeto como código (US #249)
+
+Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 2026-10-01, com `admin` no projeto
+descartável `cli-test-probe-statuses`, onde `svc` é membro sem ser admin. Teste em
+`internal/taiga/statuses_probe_integration_test.go`: `go test -tags integration -run '^TestProbeStatusContract$' -v
+./internal/taiga`. Código lido no container: `taiga/projects/models.py` (`UserStoryStatus`), `api.py`
+(`UserStoryStatusViewSet`), `permissions.py`, `validators.py`, `mixins/ordering.py` e
+`services/bulk_update_order.py`.
+
+### Catálogo e criação
+
+| Requisição | Resultado |
+|---|---|
+| `GET userstory-statuses?project=<id>` | lista com `id`, `name`, `slug`, `order`, `is_closed`, `is_archived`, `color`, `wip_limit`, `project`, já ordenada por `order` e depois `name` (`Meta.ordering`) |
+| `GET task-statuses?project=<id>` | mesmos campos, sem `is_archived` e sem `wip_limit` |
+| `version` em status | **não existe**: nem na resposta, nem no modelo (sem `OCCModelMixin`). O projeto também não tem: `version` vem `null` |
+| `POST userstory-statuses` sem `order` | 201 com `order` **10** (default do modelo), não no fim: num board com mais de dez status, o novo cai no meio |
+| `POST` com `order` | aceito como enviado |
+| `POST` com `version` | aceito e ignorado: não existe versão inicial a respeitar |
+| mesmo nome no mesmo projeto | 400 `{"name": ["Duplicated name"]}`; `unique_together (project, name)` e um `advisory_lock` na criação garantem unicidade também numa corrida |
+| mesmo nome com outra caixa | aceito (201), com outro `slug`: o nome é sensível a caixa |
+| `color` fora de `#RRGGBB` | aceito e gravado como enviado: o servidor não valida a cor |
+
+Consequências na CLI (`project apply`): o status novo vai com `order` = maior `order` atual + 1, relido antes de cada
+`POST`, para entrar no fim e na ordem do arquivo; a CLI valida a cor (`#RRGGBB`) antes de qualquer requisição. O `POST`
+nunca é repetido: 400 em `name` (outra execução criou antes) e resposta perdida depois do 2xx são resolvidos relendo o
+catálogo — status igual, sucesso; diferente, `project_changed`; ausente depois de resposta perdida, `write_applied`.
+Nome diferente só em maiúsculas de um existente é tratado como drift (o `configurar-taiga-projeto.sh` comparava sem
+diferenciar caixa), para não criar um quase-duplicado.
+
+### Permissão
+
+| Conta | Resultado |
+|---|---|
+| admin do projeto (`membership.is_admin`) e superusuário, mesmo sem ser membro *(superusuário: manual)* | `my_permissions` de `GET projects/<id>` inclui `admin_project_values` (e `i_am_admin: true`) |
+| membro sem admin (`svc`) | `my_permissions` sem `admin_project_values`; **lê** o catálogo (200); `POST`, `PATCH` e `bulk_update_order` respondem **403** |
+
+O servidor decide por `IsProjectAdmin` (`is_project_admin`: superusuário ou membro admin), não pela lista; a lista
+reflete o mesmo critério nos dois casos sondados. A CLI usa a lista como pré-checagem (ausente ou sem a permissão =
+`forbidden`, exit 6, também no `--dry-run`); o 403 do servidor continua valendo para cada escrita. `project plan`
+só lê e roda com qualquer membro.
+
+### Ordem: sem OCC (gate da Task 9)
+
+| Requisição | Resultado |
+|---|---|
+| `PATCH userstory-statuses/<id>` `{order, version: 12345}` | **200**, ordem gravada: a `version` é ignorada |
+| `PATCH` `{order}` sem `version` | **200**, ordem gravada |
+| `POST userstory-statuses/bulk_update_order` `{project, bulk_userstory_statuses: [[id, order], ...]}` | **204**; aceita qualquer chave extra (`version` inclusive) e não confere nada; roda numa transação (`@transaction.atomic`), um `UPDATE` por par |
+| `bulk_update_order` com id de status de outro projeto | 204 sem efeito: o `UPDATE` filtra por projeto, em silêncio |
+
+Nenhum dos dois caminhos tem controle de concorrência verificável: não há `version` no status nem no projeto, e o
+servidor aceita qualquer valor. Uma reordenação calculada sobre uma leitura antiga sobrescreve, sem aviso, a ordem que
+outra pessoa acabou de definir. Por isso, conforme a decisão prevista no plano da fase 2, a CLI **não reordena**:
+`versionedStatusOrderValidated` fica `false`, e um plano que exige mover status é recusado com
+`unsupported_operation` antes da primeira escrita. Criação continua disponível. Para liberar a reordenação é preciso
+uma decisão humana entre:
+
+1. aceitar a operação não versionada com checagem antes/depois (reler a ordem imediatamente antes do bulk e conferir
+   depois; detecta parte das corridas, não as impede, e o bulk pode sobrescrever uma mudança feita na janela);
+2. implementar OCC no servidor (por exemplo `version` em status ou no projeto, respeitado por `bulk_update_order`);
+3. adiar a reordenação e mantê-la na interface web.
+

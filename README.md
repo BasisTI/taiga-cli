@@ -87,6 +87,42 @@ taiga story field set 246 "Tested in staging=true" "Delivery=2026-10-15" "Notes=
 taiga story field set 246 --unset "Tested in staging" --unset "Delivery"
 ```
 
+## Project configuration
+
+| Command | What it does |
+|---|---|
+| `taiga status list [--kind story\|task]` | The project's statuses in board order |
+| `taiga project plan -f FILE\|-` | Compare the project with a TOML file; reads only |
+| `taiga project apply -f FILE\|- [--dry-run]` | Create the statuses and story fields the file declares and the project lacks |
+
+The file declares story statuses and story custom fields ([docs/examples/taiga-project.toml](docs/examples/taiga-project.toml)); unknown keys are errors:
+
+```toml
+[[story_status]]
+name = "Waiting for deployment"
+color = "#40A8E4"      # #RRGGBB, required
+closed = false         # default false
+after = "Ready for test"
+
+[[story_field]]
+name = "Tested in staging"
+type = "checkbox"      # text, date or checkbox
+description = ""       # default ""
+```
+
+- Only what the file declares is managed and nothing is ever updated or deleted. Statuses and fields missing from the file are listed as `unmanaged` and kept. A declared one that exists with another color, `closed`, type or description — or a name that differs only by case — is `drift`: `plan` shows it and `apply` refuses (`definition_drift`, exit 2) before writing anything.
+- Names are case-sensitive. Two statuses or fields with the same name in Taiga are refused (`ambiguous_name`).
+- New statuses are created after the last status, in file order. `after` places a status behind another one, existing or declared; a cycle, a self-reference or an unknown status is a usage error. **Reordering is not supported yet**: Taiga 6.7 has no optimistic concurrency for status order, so when `after` requires moving a status, `apply` refuses with `unsupported_operation` (exit 2) before any write. Leave `after` out, or point it at the last status.
+- `apply` needs `admin_project_values` (a project admin) and checks it first, also with `--dry-run` (`forbidden`, exit 6); `plan` only reads. `--dry-run` prints the requests without sending them.
+- `apply` validates everything before the first write, never repeats a write and never undoes one. Its JSON result has `plan`, `applied`, `remaining` and `complete`; `complete` is `true` only when a new read finds nothing left. If it stops halfway, the result still goes to stdout with the error on stderr; run it again and it re-plans from Taiga without duplicating anything. If Taiga changed under it, it exits with `project_changed` (exit 4).
+
+```sh
+taiga status list --output text
+taiga project plan -f taiga-project.toml
+taiga project apply -f taiga-project.toml --dry-run
+taiga project apply -f taiga-project.toml
+```
+
 ## Output and exit codes
 
 Without a terminal on stdout, `taiga` prints JSON; on a terminal it prints text. Force either with `--output json` or `--output text`. Errors go to stderr as `{"error":{"code","source","stage","cause","recovery"}}`; `code` is stable and `cause` never contains a secret.
