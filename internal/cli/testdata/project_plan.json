@@ -1,0 +1,64 @@
+{
+  "actions": [
+    {
+      "kind": "create_status",
+      "name": "Waiting for deployment",
+      "body": {
+        "color": "#3498DB",
+        "is_closed": false,
+        "name": "Waiting for deployment"
+      }
+    },
+    {
+      "kind": "create_field",
+      "name": "Testado em staging",
+      "body": {
+        "description": "Registro de teste da versão entregue",
+        "name": "Testado em staging",
+        "type": "checkbox"
+      }
+    }
+  ],
+  "unmanaged": [
+    {
+      "kind": "status",
+      "value": {
+        "color": "#70728F",
+        "id": 1,
+        "is_archived": false,
+        "is_closed": false,
+        "name": "New",
+        "order": 1,
+        "project": 37,
+        "slug": "new",
+        "wip_limit": null
+      }
+    },
+    {
+      "kind": "status",
+      "value": {
+        "color": "#E47C40",
+        "id": 3,
+        "is_archived": false,
+        "is_closed": false,
+        "name": "In progress",
+        "order": 3,
+        "project": 37,
+        "slug": "in-progress",
+        "wip_limit": null
+      }
+    },
+    {
+      "kind": "field",
+      "value": {
+        "description": "who",
+        "id": 9,
+        "name": "Executor",
+        "order": 1,
+        "project": 37,
+        "type": "text"
+      }
+    }
+  ],
+  "drift": []
+}
