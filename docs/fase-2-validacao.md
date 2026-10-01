@@ -32,14 +32,16 @@ Testes da US #249: `TestProbeStatusContract` (contrato e gate), `TestIntegration
 sem `--dry-run`, dry-run, reorder, drift, ciclo, criação no fim, segunda aplicação sem escrita, status extra
 preservado), `TestIntegrationProjectApplyStopsAndResumes` (falha na segunda criação, retomada sem duplicar),
 `TestIntegrationProjectApplyConcurrentStatus` (status igual com outra cor criado na corrida: `project_changed`, o do
-outro fica) e os testes de unidade em `internal/app/project_*_test.go` e `internal/cli/project_test.go`.
+outro fica), `TestIntegrationProjectApplyConcurrentFieldCase` (campo em outra caixa criado na corrida),
+`TestIntegrationProjectApplyBasisExample` (exemplo do fluxo Basis de ponta a ponta, com reordenação),
+`TestIntegrationProjectReorderRefusesAMovedOrder` e `TestIntegrationProjectReorderPostcondition` (corridas antes e
+depois da escrita da ordem) e os testes de unidade em `internal/app/project_*_test.go` e `internal/cli/project_test.go`.
 
 ## Pendências
 
-- **Reordenação de status (US #249):** bloqueada. O Taiga 6.7 não tem OCC na ordem dos status (sem `version`;
-  `PATCH` e `bulk_update_order` aceitam qualquer valor). A CLI recusa com `unsupported_operation`. Depende de decisão
-  humana: aceitar operação não versionada com checagem antes/depois, implementar OCC no servidor, ou adiar (ver
-  api-notes).
+- **Reordenação de status (US #249):** liberada por decisão humana em 2026-10-01 ("aceitar com conferência"), sem
+  OCC: releitura antes e depois de um único `bulk_update_order`. Detecta parte das corridas, não impede (ver
+  api-notes). OCC de verdade dependeria de mudança no servidor.
 - **Convenção de cores e campos do fluxo Basis:** `docs/examples/taiga-project.toml` reproduz o
   `configurar-taiga-projeto.sh` como exemplo; confirmar a convenção antes de migrar o script (#254).
 - Tipos de campo além de `text`, `date` e `checkbox`; valores de campos de task na CLI (#253); vínculo de épico.

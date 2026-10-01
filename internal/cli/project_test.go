@@ -108,7 +108,6 @@ func TestProjectApplyRefusalsWriteNothing(t *testing.T) {
 		"no admin":         {`["view_project","modify_us"]`, projectTOML, 6, "forbidden"},
 		"no permissions":   {`null`, projectTOML, 6, "forbidden"},
 		"drift":            {"", "[[story_status]]\nname = \"Done\"\ncolor = \"#000000\"\nclosed = true\n", 2, "definition_drift"},
-		"reorder":          {"", "[[story_status]]\nname = \"In revision\"\ncolor = \"#8E44AD\"\nafter = \"In progress\"\n", 2, "unsupported_operation"},
 		"cycle":            {"", "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nafter = \"B\"\n[[story_status]]\nname = \"B\"\ncolor = \"#000000\"\nafter = \"A\"\n", 2, "cycle"},
 		"unknown key":      {"", "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nwip = 3\n", 2, "invalid project TOML"},
 		"unknown after":    {"", "[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nafter = \"Nope\"\n", 2, "unknown status"},
@@ -130,6 +129,26 @@ func TestProjectApplyRefusalsWriteNothing(t *testing.T) {
 				t.Errorf("%s dry=%v: exit %d %s writes %v", name, dry, code, stderr, writes(calls))
 			}
 		}
+	}
+}
+
+func TestProjectApplyDryRunReorderIsOneBulkRequest(t *testing.T) {
+	f, calls := newProjectFake(t)
+	toml := "[[story_status]]\nname = \"Done\"\ncolor = \"#A8E440\"\nclosed = true\nafter = \"New\"\n"
+	out, stderr, code := runIn(t, f.env(), toml, "project", "apply", "-f", "-", "--dry-run")
+	if code != 0 {
+		t.Fatalf("%d %s", code, stderr)
+	}
+	var r struct{ Requests []map[string]any }
+	if err := json.Unmarshal([]byte(out), &r); err != nil || len(r.Requests) != 1 {
+		t.Fatalf("%v %s", err, out)
+	}
+	got, _ := json.Marshal(r.Requests[0])
+	if string(got) != `{"body":{"bulk_userstory_statuses":[[1,1],[5,2],[3,3]],"project":37},"dry_run":true,"method":"POST","path":"userstory-statuses/bulk_update_order"}` {
+		t.Fatalf("%s", got)
+	}
+	if len(writes(calls)) != 0 {
+		t.Fatalf("dry-run wrote: %v", writes(calls))
 	}
 }
 

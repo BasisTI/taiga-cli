@@ -7,10 +7,10 @@
 # - Nada é removido nem alterado: status e campos fora do arquivo ficam como estão, e um
 #   declarado que já existe com outra cor, outro `closed`, outro tipo ou outra descrição é
 #   "drift" — o plan mostra, o apply recusa (exit 2).
-# - `after` posiciona o status depois de outro. Reordenar status não é suportado no Taiga 6.7
-#   (sem controle de concorrência na ordem; ver docs/api-notes.md): com `after` que exige mover
-#   algo, o apply recusa com unsupported_operation antes de qualquer escrita. Sem `after`, ou
-#   depois do último status, o status novo é criado no fim do board, na ordem do arquivo.
+# - `after` posiciona o status depois de outro. Quando isso exige mover status, o apply grava a
+#   ordem inteira numa requisição só, conferindo a ordem antes e depois: o Taiga 6.7 não tem
+#   controle de concorrência na ordem (ver docs/api-notes.md), então a conferência detecta parte
+#   das corridas, não impede. Sem `after`, o status novo é criado no fim do board.
 
 [[story_status]]
 name = "In revision"

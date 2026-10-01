@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -115,7 +116,6 @@ func TestIntegrationProjectApply(t *testing.T) {
 		t.Fatalf("dry-run: %d %s %s", code, errOut, out)
 	}
 	for toml, want := range map[string]string{
-		"[[story_status]]\nname = \"In revision\"\ncolor = \"#5178D3\"\nafter = \"In progress\"\n":                                                 "unsupported_operation",
 		"[[story_status]]\nname = \"Done\"\ncolor = \"#000000\"\nclosed = true\n":                                                                  "definition_drift",
 		"[[story_status]]\nname = \"in progress\"\ncolor = \"#E47C40\"\n":                                                                          "definition_drift",
 		"[[story_status]]\nname = \"A\"\ncolor = \"#000000\"\nafter = \"B\"\n[[story_status]]\nname = \"B\"\ncolor = \"#000000\"\nafter = \"A\"\n": "cycle",
@@ -256,5 +256,123 @@ func TestIntegrationProjectApplyConcurrentFieldCase(t *testing.T) {
 	}
 	if got := fieldNames(t, env); got != "reviewrace/text" {
 		t.Fatalf("fields: %s", got)
+	}
+}
+
+func statusID(t *testing.T, env map[string]string, name string) string {
+	t.Helper()
+	out, errOut, code := runIn(t, env, "", "status", "list")
+	if code != 0 {
+		t.Fatalf("status list: %d %s", code, errOut)
+	}
+	var items []map[string]any
+	_ = json.Unmarshal([]byte(out), &items)
+	for _, it := range items {
+		if it["name"] == name {
+			return fmt.Sprint(it["id"])
+		}
+	}
+	t.Fatalf("no status %q", name)
+	return ""
+}
+
+func statusOrder(t *testing.T, env map[string]string) string {
+	t.Helper()
+	names := []string{}
+	for _, s := range strings.Split(statusNames(t, env), ",") {
+		names = append(names, strings.SplitN(s, "/", 2)[0])
+	}
+	return strings.Join(names, ",")
+}
+
+// The Basis flow example (docs/examples) applies end to end: statuses created and moved behind
+// their anchors with one checked bulk write, the six fields created, a second run writes nothing.
+func TestIntegrationProjectApplyBasisExample(t *testing.T) {
+	env, _, _ := freshProject(t, "cli-test-apply-example-"+fmt.Sprint(time.Now().UnixNano()))
+	example, err := os.ReadFile("../../docs/examples/taiga-project.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := runIn(t, env, string(example), "project", "apply", "-f", "-")
+	r := applyResult(t, out)
+	if code != 0 || r["complete"] != true || len(r["applied"].([]any)) != 9 {
+		t.Fatalf("apply: %d %s %s", code, errOut, out)
+	}
+	want := "New,Ready,In progress,In revision,Ready for test,Waiting for deployment,Done,Archived"
+	if got := statusOrder(t, env); got != want {
+		t.Fatalf("order:\n%s\nwant\n%s", got, want)
+	}
+	if got := fieldNames(t, env); got != "Início da implementação/date,Executor/text,Worktree/text,Testado em staging/checkbox,Testado por/text,Data do teste/date" {
+		t.Fatalf("fields: %s", got)
+	}
+	out, errOut, code = runIn(t, env, string(example), "project", "apply", "-f", "-")
+	r = applyResult(t, out)
+	if code != 0 || r["complete"] != true || len(r["applied"].([]any)) != 0 {
+		t.Fatalf("second apply: %d %s %s", code, errOut, out)
+	}
+	if got := statusOrder(t, env); got != want {
+		t.Fatalf("second apply moved statuses: %s", got)
+	}
+}
+
+const reorderTOML = "[[story_status]]\nname = \"In revision\"\ncolor = \"#5178D3\"\nafter = \"In progress\"\n"
+
+// Someone moves a status after the plan: the re-read right before the bulk write refuses it.
+func TestIntegrationProjectReorderRefusesAMovedOrder(t *testing.T) {
+	env, _, _ := freshProject(t, "cli-test-reorder-before-"+fmt.Sprint(time.Now().UnixNano()))
+	done := statusID(t, env, "Done")
+	bulks := 0
+	url := proxy(t, func(_ http.ResponseWriter, r *http.Request, _ []byte) bool {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/v1/userstory-statuses":
+			direct(t, env["TAIGA_TOKEN"], "PATCH", "/api/v1/userstory-statuses/"+done, map[string]any{"order": 0}, 200)
+		case strings.HasSuffix(r.URL.Path, "/bulk_update_order"):
+			bulks++
+		}
+		return false
+	})
+	proxied := map[string]string{"TAIGA_URL": url, "TAIGA_TOKEN": env["TAIGA_TOKEN"], "TAIGA_PROJECT": env["TAIGA_PROJECT"]}
+	out, errOut, code := runIn(t, proxied, reorderTOML, "project", "apply", "-f", "-")
+	r := applyResult(t, out)
+	if code != 4 || bulks != 0 || !strings.Contains(errOut, "project_changed") || len(r["applied"].([]any)) != 1 || r["complete"] != false {
+		t.Fatalf("exit %d, %d bulk: %s %s", code, bulks, errOut, out)
+	}
+	if got := statusOrder(t, env); got != "Done,New,Ready,In progress,Ready for test,Archived,In revision" {
+		t.Fatalf("the other writer's order was not kept: %s", got)
+	}
+}
+
+// Someone moves a status right after our bulk write: applied, detected, never repeated.
+func TestIntegrationProjectReorderPostcondition(t *testing.T) {
+	env, _, _ := freshProject(t, "cli-test-reorder-after-"+fmt.Sprint(time.Now().UnixNano()))
+	newID := statusID(t, env, "New")
+	base := testtaiga.URL()
+	bulks := 0
+	url := proxy(t, func(w http.ResponseWriter, r *http.Request, body []byte) bool {
+		if !strings.HasSuffix(r.URL.Path, "/bulk_update_order") {
+			return false
+		}
+		bulks++
+		req, _ := http.NewRequest(r.Method, base+r.URL.RequestURI(), bytes.NewReader(body))
+		req.Header = r.Header.Clone()
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Errorf("forward: %v", err)
+			w.WriteHeader(502)
+			return true
+		}
+		_ = resp.Body.Close()
+		direct(t, env["TAIGA_TOKEN"], "PATCH", "/api/v1/userstory-statuses/"+newID, map[string]any{"order": 100}, 200)
+		w.WriteHeader(resp.StatusCode)
+		return true
+	})
+	proxied := map[string]string{"TAIGA_URL": url, "TAIGA_TOKEN": env["TAIGA_TOKEN"], "TAIGA_PROJECT": env["TAIGA_PROJECT"]}
+	out, errOut, code := runIn(t, proxied, reorderTOML, "project", "apply", "-f", "-")
+	r := applyResult(t, out)
+	if code != 4 || bulks != 1 || !strings.Contains(errOut, "status_order_postcondition_failed") || !strings.Contains(errOut, "was applied") || r["complete"] != false {
+		t.Fatalf("exit %d, %d bulk: %s %s", code, bulks, errOut, out)
+	}
+	if got := statusOrder(t, env); got != "Ready,In progress,In revision,Ready for test,Done,Archived,New" {
+		t.Fatalf("order: %s", got)
 	}
 }

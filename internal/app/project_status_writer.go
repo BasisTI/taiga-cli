@@ -4,16 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/BasisTI/taiga-cli/internal/output"
 	"github.com/BasisTI/taiga-cli/internal/taiga"
 )
 
-// versionedStatusOrderValidated stays false: on Taiga 6.7.3 statuses have no version, PATCH of
-// order accepts any version and bulk_update_order has none (docs/api-notes.md, TestProbeStatusContract).
-// Turn it on only after a human decision and local evidence of a versioned order write.
-const versionedStatusOrderValidated = false
+// statusOrderCheckedWrite enables reordering WITHOUT optimistic concurrency, by human decision
+// (US #249, 2026-10-01: "aceitar com conferência"). Taiga 6.7.3 has none for status order:
+// statuses have no version, PATCH of order accepts any version and bulk_update_order has none
+// (docs/api-notes.md, TestProbeStatusContract). Reorder re-reads the order right before its one
+// bulk write and refuses if it moved since the plan, then re-reads after and reports a different
+// order. A change landing between that read and the write is detected only when it leaves
+// another order, and never prevented: it may be overwritten.
+const statusOrderCheckedWrite = true
 
 type statusHTTPWriter struct {
 	service  *Service
@@ -73,14 +78,9 @@ func (w *statusHTTPWriter) Load(ctx context.Context) ([]Object, []Object, error)
 }
 
 func (w *statusHTTPWriter) CheckReorderSupport(context.Context) error {
-	if !versionedStatusOrderValidated {
-		return Unsupported("reordering statuses is not supported: Taiga 6.7 has no optimistic concurrency for status order (statuses have no version)",
-			"declare new statuses without `after`, or after the last status, so they are created at the end; reorder in the Taiga UI")
-	}
-	for _, st := range w.baseline {
-		if _, exists := st["version"]; !exists {
-			return Unsupported("status resource has no version", "see docs/api-notes.md")
-		}
+	if !statusOrderCheckedWrite {
+		return Unsupported("reordering statuses is disabled: Taiga 6.7 has no optimistic concurrency for status order",
+			"declare new statuses without `after`, or after the last status; reorder in the Taiga UI")
 	}
 	return nil
 }
@@ -193,8 +193,11 @@ func (w *statusHTTPWriter) CreateField(ctx context.Context, desired Object) erro
 	return err
 }
 
-// Reorder writes only order, one status at a time, each with the version of the status read
-// for the plan. It runs only when versionedStatusOrderValidated is set.
+// Reorder writes the whole order in one bulk_update_order request (one transaction on the
+// server, so the board never shows half of it). It is not optimistic concurrency, see
+// statusOrderCheckedWrite: right before the write it re-reads the catalog and refuses
+// (project_changed, nothing sent) if any status appeared, vanished, was renamed or moved since
+// the plan; right after, it re-reads and requires exactly names. The write is never repeated.
 func (w *statusHTTPWriter) Reorder(ctx context.Context, names []string) error {
 	if err := w.CheckReorderSupport(ctx); err != nil {
 		return err
@@ -207,31 +210,46 @@ func (w *statusHTTPWriter) Reorder(ctx context.Context, names []string) error {
 	if err != nil {
 		return err
 	}
-	if len(index) != len(names) {
+	if len(index) != len(w.baseline) || len(names) != len(index) {
 		return changedStatus("catalog")
 	}
-	for _, name := range names {
+	for name, old := range w.baseline {
 		current, exists := index[name]
-		old, known := w.baseline[name]
-		if !exists || !known || ID(current["id"]) != ID(old["id"]) || !equal(old["order"], current["order"]) {
+		if !exists || ID(current["id"]) != ID(old["id"]) || ID(current["order"]) != ID(old["order"]) {
 			return changedStatus(name)
 		}
 	}
-	for i, name := range names {
-		old := w.baseline[name]
-		if ID(old["order"]) == int64(i) {
-			continue
-		}
-		raw, err := Snapshot(old)
-		if err != nil {
-			return err
-		}
-		if _, err := w.service.API.WriteVersionedFrom(ctx, "PATCH", fmt.Sprintf("userstory-statuses/%d", ID(old["id"])),
-			map[string]any{"order": i}, raw, false); err != nil {
-			return taiga.ToOutput(err)
-		}
+	pairs, missing := orderPairs(names, index)
+	if missing {
+		return changedStatus("catalog")
 	}
-	return nil
+	_, werr := w.service.API.Do(ctx, taiga.Request{Method: "POST", Path: statusOrderPath,
+		Body: Object{"project": w.service.Project["id"], "bulk_userstory_statuses": pairs}})
+	var ae *taiga.APIError
+	if errors.As(werr, &ae) && ae.Status < 500 {
+		return taiga.ToOutput(werr) // refused: nothing was written
+	}
+	after, rerr := w.loadStatuses(ctx)
+	if rerr != nil {
+		if werr != nil {
+			return taiga.ToOutput(werr)
+		}
+		return WriteApplied("POST", statusOrderPath, 204, rerr)
+	}
+	got := []string{}
+	for _, st := range after {
+		got = append(got, fmt.Sprint(st["name"]))
+	}
+	if reflect.DeepEqual(got, names) {
+		return nil
+	}
+	outcome := "the order write was applied (HTTP 2xx)"
+	if werr != nil {
+		outcome = "the order write has an uncertain outcome (" + taiga.ToOutput(werr).Error() + ") and may have been applied"
+	}
+	return &output.Error{Code: "status_order_postcondition_failed", Source: "api", Stage: "POST " + statusOrderPath,
+		Cause:    fmt.Sprintf("%s, but the statuses are now in another order: %v (wanted %v); another change landed next to it", outcome, got, names),
+		Recovery: "do not re-run blindly: check `taiga status list`, then run `taiga project plan` and decide", Exit: output.ExitConflict}
 }
 
 // ProjectPlan reads the project's statuses and story fields and compares them with spec.

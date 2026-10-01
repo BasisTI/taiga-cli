@@ -18,7 +18,7 @@ Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 202
 | Comentários (`PATCH {comment, version}`, `history/userstory`, integração GitLab) | validado na fase 2; ver "comentários" | `TestProbeCommentContract`, `TestProbeCommentHistoryPages`, `TestIntegrationStoryComments` |
 | Relação `assigned_to` × `assigned_users`, bloqueio | validado na fase 2; ver "responsáveis e bloqueio" | `TestProbeStoryAssignees`, `TestProbeStoryBlock` |
 | Campos customizados (definições e valores) de story e task | validado na fase 2; ver "campos customizados" | `TestProbeFieldDefinitions`, `TestProbeFieldValues`, `TestProbeTaskFieldValues`, `TestProbeFieldValuesUnset` |
-| Status de story/task, permissão `admin_project_values`, ordem sem OCC | validado na fase 2; ver "status e projeto como código" | `TestProbeStatusContract` |
+| Status de story/task, permissão `admin_project_values`, ordem sem OCC (reordenação conferida antes/depois) | validado na fase 2; ver "status e projeto como código" | `TestProbeStatusContract` |
 
 ## Fase 2 — stories (US #246)
 
@@ -406,7 +406,8 @@ descartável `cli-test-probe-statuses`, onde `svc` é membro sem ser admin. Test
 | mesmo nome com outra caixa | aceito (201), com outro `slug`: o nome é sensível a caixa |
 | `color` fora de `#RRGGBB` | aceito e gravado como enviado: o servidor não valida a cor |
 
-Consequências na CLI (`project apply`): o status novo vai com `order` = maior `order` atual + 1, relido antes de cada
+Consequências na CLI (`project apply`): nomes declarados iguais a menos de maiúsculas são recusados no TOML, e o
+catálogo (status e campos) é relido antes de cada criação. O status novo vai com `order` = maior `order` atual + 1, relido antes de cada
 `POST`, para entrar no fim e na ordem do arquivo; a CLI valida a cor (`#RRGGBB`) antes de qualquer requisição. O `POST`
 nunca é repetido: 400 em `name` (outra execução criou antes) e resposta perdida depois do 2xx são resolvidos relendo o
 catálogo — status igual, sucesso; diferente, `project_changed`; ausente depois de resposta perdida, `write_applied`.
@@ -436,13 +437,27 @@ só lê e roda com qualquer membro.
 
 Nenhum dos dois caminhos tem controle de concorrência verificável: não há `version` no status nem no projeto, e o
 servidor aceita qualquer valor. Uma reordenação calculada sobre uma leitura antiga sobrescreve, sem aviso, a ordem que
-outra pessoa acabou de definir. Por isso, conforme a decisão prevista no plano da fase 2, a CLI **não reordena**:
-`versionedStatusOrderValidated` fica `false`, e um plano que exige mover status é recusado com
-`unsupported_operation` antes da primeira escrita. Criação continua disponível. Para liberar a reordenação é preciso
-uma decisão humana entre:
+outra pessoa acabou de definir.
 
-1. aceitar a operação não versionada com checagem antes/depois (reler a ordem imediatamente antes do bulk e conferir
-   depois; detecta parte das corridas, não as impede, e o bulk pode sobrescrever uma mudança feita na janela);
-2. implementar OCC no servidor (por exemplo `version` em status ou no projeto, respeitado por `bulk_update_order`);
-3. adiar a reordenação e mantê-la na interface web.
+**Decisão humana (2026-10-01): "aceitar com conferência".** A CLI reordena sem OCC, mitigando e documentando, no
+mesmo padrão dos responsáveis (US #247). Constante `statusOrderCheckedWrite = true` em
+`internal/app/project_status_writer.go`:
 
+- **mecanismo: `bulk_update_order`**, e não `PATCH` por status. É uma requisição só, executada numa transação no
+  servidor: a janela entre a releitura e a escrita é de um round-trip, e o board nunca mostra metade da nova ordem.
+  Com `PATCH` individual seriam N requisições, N janelas e estados intermediários visíveis; nenhum dos dois tem
+  `version`. O corpo leva todos os status do projeto com posições 1..N (os não declarados mantêm a ordem relativa);
+- **antes:** relê o catálogo logo antes do bulk; se algum status apareceu, sumiu, mudou de nome, de id ou de `order`
+  desde a leitura do plano (mais os criados pelo próprio apply), recusa com `project_changed` (exit 4) sem enviar;
+- **depois:** relê e exige exatamente a ordem pretendida. Se não bate, `status_order_postcondition_failed` (exit 4),
+  dizendo que a escrita **foi aplicada** (ou teve resultado incerto, em rede/5xx) e para não repetir às cegas. 4xx do
+  bulk é recusa: o erro dele, sem conferência. Resposta perdida depois do 2xx: vale a releitura;
+- nunca há repetição automática do bulk. Como o bulk grava posições absolutas, rodar o apply de novo depois de
+  conferir é seguro: ele replaneja e confere outra vez;
+- limite: uma mudança que cai entre a releitura e o bulk é sobrescrita; só é detectada se deixar outra ordem na
+  releitura posterior. A conferência detecta parte das corridas, não impede.
+
+Testes: `TestStatusWriterReorder*` (unidade), `TestIntegrationProjectApplyBasisExample`,
+`TestIntegrationProjectReorderRefusesAMovedOrder` e `TestIntegrationProjectReorderPostcondition` (corridas via
+proxy). OCC de verdade continua dependendo do servidor (por exemplo `version` em status ou no projeto, respeitado
+pelo `bulk_update_order`).

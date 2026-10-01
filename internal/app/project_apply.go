@@ -115,6 +115,22 @@ func nextStatusOrder(statuses []Object) int64 {
 	return max + 1
 }
 
+const statusOrderPath = "userstory-statuses/bulk_update_order"
+
+// orderPairs is the bulk_update_order body for names: [id, position] with 1-based positions.
+// missing reports a name without a status in index.
+func orderPairs(names []string, index map[string]Object) ([][]int64, bool) {
+	pairs := [][]int64{}
+	for i, name := range names {
+		st, ok := index[name]
+		if !ok {
+			return nil, true
+		}
+		pairs = append(pairs, []int64{ID(st["id"]), int64(i + 1)})
+	}
+	return pairs, false
+}
+
 // PreviewProject materializes the requests of plan without sending anything. statuses is the
 // read that produced plan. New statuses get an order after the current ones, in file order.
 func PreviewProject(plan ProjectPlan, statuses []Object, projectID any) ([]WritePlan, []Action, error) {
@@ -145,22 +161,13 @@ func PreviewProject(plan ProjectPlan, statuses []Object, projectID any) ([]Write
 			if !ok {
 				return nil, nil, fmt.Errorf("invalid reorder plan")
 			}
-			for i, name := range names {
-				st, exists := index[name]
-				if !exists {
-					deferred = append(deferred, Action{"reorder_created_status", name, Object{"order": i, "depends_on": "create_status"}})
-					continue
-				}
-				if ID(st["order"]) == int64(i) {
-					continue
-				}
-				version, ok := st["version"]
-				if !ok {
-					return nil, nil, Unsupported("status ordering requires a version", "statuses of Taiga 6.7 have none; see docs/api-notes.md")
-				}
-				requests = append(requests, WritePlan{true, "PATCH", fmt.Sprintf("userstory-statuses/%d", ID(st["id"])),
-					Object{"order": i, "version": version}})
+			pairs, missing := orderPairs(names, index)
+			if missing {
+				// Statuses created by this run have no id yet: the bulk body is known only then.
+				deferred = append(deferred, Action{"reorder_statuses", "", Object{"names": names, "depends_on": "create_status"}})
+				continue
 			}
+			requests = append(requests, WritePlan{true, "POST", statusOrderPath, Object{"project": projectID, "bulk_userstory_statuses": pairs}})
 		}
 	}
 	return requests, deferred, nil

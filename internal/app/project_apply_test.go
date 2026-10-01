@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -168,9 +169,22 @@ func TestPreviewProject(t *testing.T) {
 	if requests[0].Body["order"] != int64(6) || requests[2].Body["order"] != int64(7) || requests[1].Path != "userstory-custom-attributes" || requests[1].Body["order"] != nil {
 		t.Fatalf("%+v", requests)
 	}
+	// One bulk request with the whole order, 1-based.
 	reorder := ProjectPlan{Actions: []Action{{"reorder_statuses", "", Object{"names": []string{"Done", "New", "In progress", "Ready for test"}}}}}
-	if _, _, err := PreviewProject(reorder, remoteStatuses(), 37); err == nil || exitOf(err) != 2 {
-		t.Fatalf("a status without version cannot be reordered: %v", err)
+	requests, deferred, err = PreviewProject(reorder, remoteStatuses(), 37)
+	if err != nil || len(deferred) != 0 || len(requests) != 1 {
+		t.Fatalf("%v %v %v", requests, deferred, err)
+	}
+	want := Object{"project": 37, "bulk_userstory_statuses": [][]int64{{5, 1}, {1, 2}, {3, 3}, {4, 4}}}
+	if r := requests[0]; r.Method != "POST" || r.Path != "userstory-statuses/bulk_update_order" || !reflect.DeepEqual(r.Body, want) {
+		t.Fatalf("%+v", r)
+	}
+	// With a status still to be created, its id is unknown: the bulk request is deferred.
+	reorder.Actions = append([]Action{{"create_status", "X", Object{"name": "X", "color": "#000000", "is_closed": false}}},
+		Action{"reorder_statuses", "", Object{"names": []string{"New", "X", "In progress", "Ready for test", "Done"}}})
+	requests, deferred, err = PreviewProject(reorder, remoteStatuses(), 37)
+	if err != nil || len(requests) != 1 || len(deferred) != 1 || deferred[0].Kind != "reorder_statuses" || deferred[0].Body["depends_on"] != "create_status" {
+		t.Fatalf("%v %v %v", requests, deferred, err)
 	}
 }
 
@@ -180,6 +194,10 @@ type statusAPI struct {
 	statuses    []Object
 	fields      []Object
 	posts       []taiga.Request
+	bulks       []taiga.Request
+	bulkErr     error
+	bulkApplies bool // bulkErr comes after the order was written
+	afterBulk   func(*statusAPI)
 	fieldPosts  []taiga.Request
 	postErr     error
 	created     bool // postErr comes after the status was created
@@ -196,6 +214,24 @@ func (a *statusAPI) Do(_ context.Context, r taiga.Request) (*taiga.Response, err
 				return &taiga.Response{Status: 200, Body: b}, nil
 			}
 		}
+	case r.Method == "POST" && r.Path == "userstory-statuses/bulk_update_order":
+		a.bulks = append(a.bulks, r)
+		if a.bulkErr == nil || a.bulkApplies {
+			for _, pair := range r.Body.(Object)["bulk_userstory_statuses"].([][]int64) {
+				for _, st := range a.statuses {
+					if ID(st["id"]) == pair[0] {
+						st["order"] = pair[1]
+					}
+				}
+			}
+		}
+		if a.afterBulk != nil {
+			a.afterBulk(a)
+		}
+		if a.bulkErr != nil {
+			return nil, a.bulkErr
+		}
+		return &taiga.Response{Status: 204}, nil
 	case r.Method == "POST" && r.Path == "userstory-custom-attributes":
 		a.fieldPosts = append(a.fieldPosts, r)
 		f := Object{"id": 80 + len(a.fieldPosts), "project": 37}
@@ -321,15 +357,71 @@ func TestStatusWriterCreateStatusNeverRepeatsThePost(t *testing.T) {
 	}
 }
 
-func TestStatusWriterRefusesReorder(t *testing.T) {
-	w := statusWriter(&statusAPI{})
+func loaded(t *testing.T, a *statusAPI) *statusHTTPWriter {
+	t.Helper()
+	w := statusWriter(a)
 	if _, _, err := w.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	for _, err := range []error{w.CheckReorderSupport(context.Background()), w.Reorder(context.Background(), []string{"Done", "New", "In progress", "Ready for test"})} {
-		if exitOf(err) != 2 || !strings.Contains(fmt.Sprint(err), "unsupported_operation") {
-			t.Fatalf("%v", err)
+	return w
+}
+
+var reordered = []string{"Done", "New", "In progress", "Ready for test"}
+
+func TestStatusWriterReorderChecksBeforeAndAfter(t *testing.T) {
+	a := &statusAPI{}
+	w := loaded(t, a)
+	if err := w.CheckReorderSupport(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Reorder(context.Background(), reordered); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.bulks) != 1 || !reflect.DeepEqual(a.bulks[0].Body, Object{"project": 37, "bulk_userstory_statuses": [][]int64{{5, 1}, {1, 2}, {3, 3}, {4, 4}}}) {
+		t.Fatalf("bulk: %+v", a.bulks)
+	}
+	got, _ := w.loadStatuses(context.Background())
+	if fmt.Sprintf("%v %v", got[0]["name"], got[3]["name"]) != "Done Ready for test" {
+		t.Fatalf("order: %v", got)
+	}
+}
+
+func TestStatusWriterReorderRefusesAMovedOrder(t *testing.T) {
+	for name, change := range map[string]func(a *statusAPI){
+		"order moved":    func(a *statusAPI) { a.statuses[0]["order"] = 9 },
+		"status added":   func(a *statusAPI) { a.statuses = append(a.statuses, Object{"id": 9, "name": "Y", "order": 9}) },
+		"status renamed": func(a *statusAPI) { a.statuses[1]["name"] = "Doing" },
+	} {
+		a := &statusAPI{}
+		w := loaded(t, a)
+		change(a)
+		if err := w.Reorder(context.Background(), reordered); exitOf(err) != 4 || !strings.Contains(fmt.Sprint(err), "project_changed") || len(a.bulks) != 0 {
+			t.Errorf("%s: %v %d", name, err, len(a.bulks))
 		}
+	}
+}
+
+func TestStatusWriterReorderPostcondition(t *testing.T) {
+	// Someone moves a status right after our bulk: the write is applied, the order is not ours.
+	a := &statusAPI{afterBulk: func(a *statusAPI) { a.statuses[0]["order"] = 0 }}
+	err := loaded(t, a).Reorder(context.Background(), reordered)
+	if exitOf(err) != 4 || !strings.Contains(fmt.Sprint(err), "status_order_postcondition_failed") || len(a.bulks) != 1 {
+		t.Fatalf("%v %d", err, len(a.bulks))
+	}
+	// A refused bulk (4xx) was not applied: its own error, no postcondition.
+	a = &statusAPI{bulkErr: &taiga.APIError{Status: 400, Method: "POST", Path: "userstory-statuses/bulk_update_order", Body: []byte(`{"_error_message":"bad"}`)}}
+	if err := loaded(t, a).Reorder(context.Background(), reordered); exitOf(err) != 2 || len(a.bulks) != 1 {
+		t.Fatalf("4xx: %v", err)
+	}
+	// A lost answer: the re-read decides. Applied and matching is a success.
+	a = &statusAPI{bulkErr: &taiga.UnreadableBodyError{Method: "POST", Path: "userstory-statuses/bulk_update_order", Status: 204, Err: errors.New("EOF")}, bulkApplies: true}
+	if err := loaded(t, a).Reorder(context.Background(), reordered); err != nil {
+		t.Fatalf("lost answer, applied: %v", err)
+	}
+	// A 5xx that did not apply: the order differs, reported without retry.
+	a = &statusAPI{bulkErr: &taiga.APIError{Status: 502, Method: "POST", Path: "userstory-statuses/bulk_update_order"}}
+	if err := loaded(t, a).Reorder(context.Background(), reordered); exitOf(err) != 4 || len(a.bulks) != 1 {
+		t.Fatalf("5xx: %v %d", err, len(a.bulks))
 	}
 }
 
@@ -344,7 +436,7 @@ func TestApplyProjectAgainstTheHTTPWriter(t *testing.T) {
 	}
 	spec.StoryStatus[0].After = "In progress"
 	got, err = s.ApplyProject(context.Background(), spec, false)
-	if exitOf(err) != 2 || len(a.posts) != 1 || got.Complete {
+	if err != nil || len(a.posts) != 1 || len(a.bulks) != 1 || !got.Complete || kinds(got.Applied) != "reorder_statuses:" {
 		t.Fatalf("reorder: %+v %v", got, err)
 	}
 }
