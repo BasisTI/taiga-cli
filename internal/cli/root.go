@@ -78,6 +78,9 @@ func (a *App) root() *cobra.Command {
 	root.AddCommand(a.statusCmd())
 	root.AddCommand(a.swimlaneCmd())
 	root.AddCommand(a.attachmentCmd())
+	root.AddCommand(a.userCmd())
+	root.AddCommand(a.milestoneCmd())
+	root.AddCommand(a.epicCmd())
 	return root
 }
 

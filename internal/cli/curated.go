@@ -75,6 +75,9 @@ func (a *App) renderKeys(v any, textKeys []string) error {
 			if names, ok := val.([]string); ok {
 				val = strings.Join(names, ", ")
 			}
+			if links, ok := val.([]app.Object); ok {
+				val = strings.Join(linkedStoryRefs(links), ", ")
+			}
 			text := fmt.Sprint(val)
 			if strings.ContainsFunc(text, unsafeRune) {
 				text = strconv.Quote(text) // one line per key: a line break cannot forge another key
@@ -114,6 +117,45 @@ func (a *App) renderKeys(v any, textKeys []string) error {
 			fields = append(fields, output.Field{Key: k, Value: escapeJSON(string(object[k]))})
 		}
 		return output.WriteFields(a.Out, fields)
+	}
+}
+
+// linkedStoryRefs is the text form of linked stories (epic get): the ref, prefixed with the project
+// slug for a story of another project, or the id when the account cannot read the story.
+func linkedStoryRefs(links []app.Object) []string {
+	out := []string{}
+	for _, l := range links {
+		switch {
+		case l["ref"] == nil:
+			out = append(out, fmt.Sprintf("id:%v", l["id"]))
+		case l["project_slug"] != nil:
+			out = append(out, fmt.Sprintf("%v#%v", l["project_slug"], l["ref"]))
+		default:
+			out = append(out, fmt.Sprint(l["ref"]))
+		}
+	}
+	return out
+}
+
+// searchFlag adds --search to cmd; the returned func checks it was not given blank.
+func searchFlag(cmd *cobra.Command, search *string, what string) func() error {
+	cmd.Flags().StringVar(search, "search", "", what+" contains this text, ignoring case (accents must match)")
+	return func() error {
+		if cmd.Flags().Changed("search") && strings.TrimSpace(*search) == "" {
+			return app.Usage("--search must not be blank")
+		}
+		return nil
+	}
+}
+
+// closedFlag adds --closed to cmd; the returned func gives nil when it was not given.
+func closedFlag(cmd *cobra.Command, closed *bool, what string) func() *bool {
+	cmd.Flags().BoolVar(closed, "closed", false, "only closed "+what+" (--closed=false: only open ones)")
+	return func() *bool {
+		if !cmd.Flags().Changed("closed") {
+			return nil
+		}
+		return closed
 	}
 }
 

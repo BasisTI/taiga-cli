@@ -206,6 +206,12 @@ func RedactSecrets(s string) string {
 	return tokenParam.ReplaceAllString(s, "${1}…")
 }
 
+// RedactTokens hides only the value of every token= parameter in s, keeping the rest of the
+// text: read output keeps the URLs users wrote, but never a signed link's credential.
+func RedactTokens(s string) string {
+	return tokenParam.ReplaceAllString(s, "${1}…")
+}
+
 // redactURLSecrets is RedactSecrets plus every value of u's query, raw or escaped, wherever it
 // appears in s.
 func redactURLSecrets(s string, u *url.URL) string {

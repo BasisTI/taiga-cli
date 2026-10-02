@@ -100,7 +100,22 @@ func (s *Service) Catalog(ctx context.Context, path string) ([]Object, error) {
 	if items, ok := s.catalogs[path]; ok {
 		return items, nil
 	}
-	raws, err := s.API.GetAll(ctx, path, url.Values{"project": {s.projectID()}})
+	items, err := s.list(ctx, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.catalogs[path] = items
+	return items, nil
+}
+
+// list reads path for the project with the extra query parameters, uncached, dropping entries
+// that declare another project.
+func (s *Service) list(ctx context.Context, path string, extra url.Values) ([]Object, error) {
+	q := url.Values{"project": {s.projectID()}}
+	for k, v := range extra {
+		q[k] = v
+	}
+	raws, err := s.API.GetAll(ctx, path, q)
 	if err != nil {
 		return nil, taiga.ToOutput(err)
 	}
@@ -115,7 +130,6 @@ func (s *Service) Catalog(ctx context.Context, path string) ([]Object, error) {
 		}
 		items = append(items, obj)
 	}
-	s.catalogs[path] = items
 	return items, nil
 }
 
