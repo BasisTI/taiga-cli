@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/BasisTI/taiga-cli/internal/app"
 	"github.com/BasisTI/taiga-cli/internal/auth"
 	"github.com/BasisTI/taiga-cli/internal/config"
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -219,7 +221,15 @@ func (a *App) printStatus(ctx context.Context, diagnose bool) error {
 		if host.SecretSource == "keyring" || host.SecretSource == "" {
 			probe = auth.Keyring{Ref: ref}.Available
 		}
-		v.Checks = auth.Diagnose(ctx, auth.DiagnoseInput{Env: a.Env, Store: r.Store, Ref: ref, Secret: r.Secret, KeyringProbe: probe, StdinTTY: a.stdinIsTTY(), Now: time.Now})
+		project := &auth.ProjectInput{Selected: rc.Ctx.Project.Value, Source: rc.Ctx.Project.Source, AuthFailed: identityErr != nil,
+			Load: func(ctx context.Context) (map[string]any, error) {
+				s, err := app.New(ctx, c, rc.Ctx.Project.Value)
+				if err != nil {
+					return nil, err
+				}
+				return s.Project, nil
+			}}
+		v.Checks = auth.Diagnose(ctx, auth.DiagnoseInput{Env: a.Env, Store: r.Store, Ref: ref, Secret: r.Secret, KeyringProbe: probe, StdinTTY: a.stdinIsTTY(), Now: time.Now, Project: project})
 	}
 	mode, _ := output.DetectMode(a.output, a.OutTTY)
 	if mode == output.JSON {
@@ -234,6 +244,11 @@ func (a *App) printStatus(ctx context.Context, diagnose bool) error {
 		fields = append(fields, output.Field{Key: "session", Value: v.Session.ExpiresAt + " " + v.Session.Path})
 		for _, ch := range v.Checks {
 			fields = append(fields, output.Field{Key: "check " + ch.Name, Value: ch.Status + " " + ch.Detail})
+		}
+		for i, f := range fields {
+			if strings.ContainsFunc(f.Value, unsafeRune) {
+				fields[i].Value = strconv.Quote(f.Value) // one line per key: the server's text cannot forge another check
+			}
 		}
 		if err := output.WriteFields(a.Out, fields); err != nil {
 			return err

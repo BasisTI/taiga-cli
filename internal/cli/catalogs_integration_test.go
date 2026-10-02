@@ -5,6 +5,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,8 @@ func fieldOf(items []map[string]any, key string) string {
 // TestIntegrationCatalogCommands reads projects, members, milestones and epics as svc, a plain
 // member, in a project of its own (admin prepares it through `taiga api`).
 func TestIntegrationCatalogCommands(t *testing.T) {
+	// auth status --diagnose probes the keyring: point it at nothing, never at the real one.
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(t.TempDir(), "no-bus"))
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	env, svc, pid := freshProject(t, "cli-test-catalogs-"+suffix)
 	slug := env["TAIGA_PROJECT"]
@@ -139,6 +142,23 @@ func TestIntegrationCatalogCommands(t *testing.T) {
 	_, errOut, code := runIn(t, svc, "", "epic", "get", fmt.Sprint(story["ref"]))
 	if code != 5 || !strings.Contains(errOut, `"not_found"`) {
 		t.Fatalf("epic get <story ref>: %d %s", code, errOut)
+	}
+
+	// auth status --diagnose: the project check as a plain member, then for a hidden project.
+	out, errOut, code := runIn(t, svc, "", "auth", "status", "--diagnose")
+	var st struct{ Checks []map[string]any }
+	if err := json.Unmarshal([]byte(out), &st); err != nil || code != 0 {
+		t.Fatalf("diagnose: %d %v %s %s", code, err, out, errOut)
+	}
+	check := st.Checks[len(st.Checks)-1]
+	data, _ := check["data"].(map[string]any)
+	if check["name"] != "project" || check["status"] != "ok" || data["is_member"] != true || data["is_admin"] != false ||
+		fmt.Sprint(data["missing_permissions"]) != "[admin_project_values]" || data["is_epics_activated"] != true {
+		t.Fatalf("project check: %v", check)
+	}
+	out, _, _ = runIn(t, svc, "", "auth", "status", "--diagnose", "--project", fmt.Sprint(other["slug"]))
+	if !strings.Contains(out, `"status": "failed"`) || !strings.Contains(out, "not_found") {
+		t.Fatalf("hidden project check: %s", out)
 	}
 
 	// Module off: refused by the CLI, though Taiga still serves the epics.
