@@ -38,8 +38,8 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 |---|---|
 | `taiga story list [--ref N] [--status S] [--assignee USER\|me] [--epic REF] [--swimlane L\|--no-swimlane] [--tag T]... [--search TEXT] [--closed[=false]]` | Every matching story, without manual paging. Repeated `--tag` must all match |
 | `taiga story get REF` / `taiga story get --id ID` | One story, with its web `url`; JSON output also carries `custom_attributes` (values with their own `version`) |
-| `taiga story create --subject S [--description-file F\|-] [--status S] [--tag T]... [--swimlane L] [--assignee USER]...` | Create a story |
-| `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L\|--clear-swimlane] [--add-assignee USER]... [--remove-assignee USER]... [--owner-assignee USER\|--clear-owner-assignee] [--block NOTE\|--unblock]` | Send only the fields that change, with the story `version` |
+| `taiga story create --subject S [--description-file F\|-] [--status S] [--tag T]... [--swimlane L] [--assignee USER]... [--epic REF]` | Create a story; `--epic` links it to an epic after creating it |
+| `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L\|--clear-swimlane] [--add-assignee USER]... [--remove-assignee USER]... [--owner-assignee USER\|--clear-owner-assignee] [--block NOTE\|--unblock] [--epic REF\|--replace-epic REF --confirm-delete]` | Send only the fields that change, with the story `version`; then add the epic link, or make it the only one |
 | `taiga story close REF [--status S]` | Move to a closed status; never archives or deletes |
 | `taiga story field list REF` | The story's custom field values next to their definitions |
 | `taiga story field set REF ["Name=value"]... [--unset NAME]...` | Merge custom field values: named fields change, the others stay |
@@ -58,7 +58,7 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 - Every write accepts `--dry-run` (prints method, path and body) and, except `create`, `--force-version`.
 - `comment` sends the text exactly as given (quotes, accents, line breaks) and never touches the description. A blank comment is refused. Taiga accepts any past `version` for a comment, so the version protects nothing there and there is no `--force-version`: the comment is sent once. If the answer is lost (network error or 5xx), the CLI looks for it in the story history: found, the command succeeds; otherwise it exits with `comment_unconfirmed` (exit 1), because a request still running on the server can land later. Check `story comments` before publishing again. Exit 7 (`network_error`) means the connection never opened, so nothing was sent.
 - `comments` lists every comment, including edited and deleted ones (`edit_comment_date`, `delete_comment_date`). Comments written by Taiga's own GitLab integration (its inactive `gitlab-<hash>` user, with the push hook templates "This user story has been mentioned by …" and "… changed the status from [GitLab commit]…") are hidden unless `--include-system`; every other author, service accounts included, is always shown. Each entry carries `is_system`, `story_ref` and the story `url`.
-- `--epic` on `create`/`update` answers `unsupported_operation`: Taiga links epics through a separate, unversioned resource whose replacement needs `DELETE` (see [docs/api-notes.md](docs/api-notes.md)).
+- `--epic` and `--replace-epic`: see "Linking stories to epics" below.
 
 ```sh
 taiga story list --assignee me --closed=false
@@ -92,6 +92,29 @@ taiga project get --output text
 taiga user list --search silva
 taiga milestone list --closed=false
 taiga epic get 12 --output text
+```
+
+### Linking stories to epics
+
+| Command | What it does |
+|---|---|
+| `taiga epic link EPIC_REF STORY_REF [--dry-run]` | Add the epic to the story's epics; the story keeps the others (Taiga allows several) |
+| `taiga epic link EPIC_REF STORY_REF --replace --confirm-delete [--dry-run]` | Make the epic the story's only one: link it, then remove every other link |
+| `taiga story create ... --epic REF` / `taiga story update REF ... --epic REF` | Same as `epic link`, after the story write |
+| `taiga story update REF ... --replace-epic REF --confirm-delete` | Same as `epic link --replace`, after the story write |
+
+- Replacing creates the new link **before** removing the old ones, so the story never ends without an epic. It is the only curated command that sends `DELETE`, and it requires `--confirm-delete`, also with `--dry-run` (which lists the `POST` and every `DELETE`). Without it the command exits 2 (`delete_not_confirmed`) and sends nothing.
+- A link has no `version` in Taiga. The CLI re-reads the story's epics right before the `POST` (a change since the first read is `version_conflict`, nothing sent) and checks them after the writes (`epic_links_postcondition_failed`, exit 4, when they do not match). An epic linked by someone else between the `POST` and the `DELETE`s stops the replacement before any `DELETE`.
+- Running the same command again is safe: Taiga refuses a duplicate link and answers a repeated `DELETE` with 404, and the CLI treats both as done after re-reading the story. A link already there is a no-op (`changed: false`). When an answer is lost, the command exits 1 with `epic_link_unconfirmed` or `epic_replace_incomplete` (with what was linked, removed and remaining): run the same command again to finish.
+- `story create --epic`: the story exists once created. If the link then fails, the command exits 1 with `story_created_link_failed`, naming the new story; link it with `taiga epic link EPIC REF` instead of creating again. With other fields, `story update` writes them first; a failed link says they are saved and points to `epic link`.
+- The epic is resolved by ref in the selected project only, before any write. Taiga itself would link an epic of another project.
+- Linking needs the `modify_epic` permission (`forbidden`, exit 6, without it); `auth status --diagnose` lists it when missing.
+
+```sh
+taiga epic link 12 246
+taiga epic link 15 246 --replace --confirm-delete --dry-run
+taiga story create --subject "Export CSV" --epic 12
+taiga story update 246 --replace-epic 15 --confirm-delete
 ```
 
 ## Attachments

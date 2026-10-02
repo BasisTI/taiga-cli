@@ -82,18 +82,6 @@ func TestStoryRejectsInvalidSelectorsAndConflictingFlags(t *testing.T) {
 	}
 }
 
-func TestStoryEpicWriteIsUnsupportedBeforeNetwork(t *testing.T) {
-	for _, args := range [][]string{
-		{"story", "create", "--subject", "s", "--epic", "4"},
-		{"story", "update", "246", "--epic", "4"},
-	} {
-		_, stderr, code := runIn(t, map[string]string{"TAIGA_URL": "http://127.0.0.1:1", "TAIGA_TOKEN": "tok"}, "", args...)
-		if code != 2 || !strings.Contains(stderr, `"unsupported_operation"`) || !strings.Contains(stderr, "related_userstories") {
-			t.Fatalf("%v: %d %s", args, code, stderr)
-		}
-	}
-}
-
 // storyFake is a stateful Taiga with two projects, OCC on PATCH and paginated lists.
 type storyFake struct {
 	t        *testing.T
@@ -106,6 +94,7 @@ type storyFake struct {
 	epics    []map[string]any
 	pageSize int
 	fail     map[string]int
+	failBody string // the body of an injected failure, when set
 	nextID   int64
 	srv      string
 	onPatch  func(map[string]any)
@@ -228,7 +217,11 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if status, ok := f.fail[r.Method+" "+path]; ok {
 		w.WriteHeader(status)
-		_, _ = fmt.Fprint(w, `{"_error_message":"injected"}`)
+		body := `{"_error_message":"injected"}`
+		if f.failBody != "" {
+			body = f.failBody
+		}
+		_, _ = fmt.Fprint(w, body)
 		return
 	}
 	project := func() bool {
@@ -238,7 +231,7 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return true
 	}
-	if f.handleFields(w, r, path) || f.handleComments(w, r, path) {
+	if f.handleFields(w, r, path) || f.handleComments(w, r, path) || f.handleEpicLinks(w, r, path) {
 		return
 	}
 	switch {
