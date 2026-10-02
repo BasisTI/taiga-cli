@@ -29,11 +29,6 @@ func tagNames(flag string, tags []string) ([]string, error) {
 	return out, nil
 }
 
-// errEpicLink blocks --epic on writes: the probe showed "epics" is ignored by PATCH and the link
-// is an unversioned POST whose replacement needs DELETE (docs/api-notes.md).
-var errEpicLink = app.Unsupported("linking a story to an epic is not supported yet: Taiga links epics through epics/<id>/related_userstories, without version, and replacing a link requires DELETE",
-	"link the story in the Taiga web UI, or with `taiga api POST epics/<id>/related_userstories`")
-
 func (a *App) storyCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "story", Short: "Read and update user stories"}
 	cmd.AddCommand(a.storyListCmd(), a.storyGetCmd(), a.storyWriteCmd(false), a.storyWriteCmd(true), a.storyCloseCmd(), a.storyFieldCmd(), a.storyCommentCmd(), a.storyCommentsCmd())
@@ -310,9 +305,9 @@ func resolveAssignees(cmd *cobra.Command, service *app.Service, patch *app.Patch
 }
 
 func (a *App) storyWriteCmd(update bool) *cobra.Command {
-	var subject, descriptionFile, appendText, status, epic, milestone, swimlane string
+	var subject, descriptionFile, appendText, status, epic, replaceEpic, milestone, swimlane string
 	var tags, addTags, removeTags []string
-	var dry, force bool
+	var dry, force, confirmDelete bool
 	use, short := "create", "Create a story"
 	args := cobra.NoArgs
 	if update {
@@ -366,8 +361,20 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 		if f.Changed("swimlane") && clearSwimlane {
 			return app.Usage("choose --swimlane or --clear-swimlane")
 		}
-		if f.Changed("epic") {
-			return errEpicLink
+		for _, name := range []string{"epic", "replace-epic"} {
+			if f.Changed(name) {
+				if err := validRef(f.Lookup(name).Value.String()); err != nil {
+					return app.Usage("--" + name + " must be an epic reference (a positive integer)")
+				}
+			}
+		}
+		if f.Changed("epic") && f.Changed("replace-epic") {
+			return app.Usage("choose --epic (add) or --replace-epic (replace)")
+		}
+		if update {
+			if err := checkReplace(f.Changed("replace-epic"), confirmDelete, "--replace-epic"); err != nil {
+				return err
+			}
 		}
 		if err := checkAssigneeFlags(cmd, update); err != nil {
 			return err
@@ -409,10 +416,26 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 		if err := resolveAssignees(cmd, service, &patch, update); err != nil {
 			return err
 		}
+		// The epic is resolved before any write, so a wrong ref never leaves a half-done change.
+		var linked app.Object
+		epicRef, replaceLinks := epic, f.Changed("replace-epic")
+		if replaceLinks {
+			epicRef = replaceEpic
+		}
+		if f.Changed("epic") || replaceLinks {
+			if linked, err = service.LinkableEpic(cmd.Context(), epicRef); err != nil {
+				return err
+			}
+		}
 		var result any
-		if update {
+		switch {
+		case update && linked != nil:
+			result, err = service.UpdateStoryWithEpic(cmd.Context(), argv[0], patch, linked, replaceLinks, dry, force)
+		case update:
 			result, err = service.UpdateStory(cmd.Context(), argv[0], patch, dry, force)
-		} else {
+		case linked != nil:
+			result, err = service.CreateStoryWithEpic(cmd.Context(), patch.Set, linked, dry)
+		default:
 			result, err = service.CreateStory(cmd.Context(), patch.Set, dry)
 		}
 		if err != nil {
@@ -425,12 +448,14 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 	f.StringVar(&descriptionFile, "description-file", "", "read the description from FILE, or - for stdin")
 	f.StringVar(&status, "status", "", "status name or id")
 	f.StringVar(&swimlane, "swimlane", "", "swimlane name or id")
-	f.StringVar(&epic, "epic", "", "epic reference (not supported yet: see docs/api-notes.md)")
+	f.StringVar(&epic, "epic", "", "link the story to this epic (reference), keeping its other epics")
 	f.StringArrayVar(&tags, "tag", nil, "set the tags, repeatable (replaces the current ones)")
 	if update {
 		f.StringVar(&appendText, "append-description", "", "append text to the description, after a blank line")
 		f.StringVar(&milestone, "milestone", "", "milestone (sprint) name or id")
 		f.Bool("clear-swimlane", false, "remove the story from its swimlane")
+		f.StringVar(&replaceEpic, "replace-epic", "", "make this epic (reference) the story's only epic: links it, then removes the others (requires --confirm-delete)")
+		f.BoolVar(&confirmDelete, "confirm-delete", false, "required with --replace-epic: it deletes the other epic links")
 		f.StringArrayVar(&addTags, "add-tag", nil, "add a tag, repeatable")
 		f.StringArrayVar(&removeTags, "remove-tag", nil, "remove a tag, repeatable")
 	}

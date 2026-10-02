@@ -23,7 +23,7 @@ A `taiga-cli` é uma ferramenta nova, pública, escrita do zero em Go. Não copi
 **Meta de longo prazo:** comandos curados para toda a API; um MCP fino gerado a partir das mesmas operações, para clientes sem shell.
 
 **Fora do MVP:**
-- operações de exclusão (`DELETE`) em comandos curados;
+- operações de exclusão (`DELETE`) em comandos curados, **exceto** a remoção do vínculo story↔épico na troca (`epic link --replace`, `story update --replace-epic`), com `--confirm-delete` (decisão de 2026-10-01);
 - issues, wiki, webhooks, memberships e roles curados (ficam acessíveis por `taiga api`);
 - servidor MCP;
 - cache de catálogos em disco;
@@ -212,7 +212,7 @@ Flags comuns: `--project`, `--output`, `--dry-run` (em escritas).
 | `taiga story list [--status] [--assignee] [--epic] [--swimlane\|--no-swimlane] [--tag] [--search] [--closed]` | Listagem sem paginação manual; o filtro de swimlane é sempre conferido localmente |
 | `taiga story get REF\|--id ID` | Detalhe com `url`, campos customizados e bloqueio |
 | `taiga story create --subject S [--description-file F] [--status] [--tag]... [--assignee]... [--epic] [--swimlane]` | Criação |
-| `taiga story update REF [flags]` | `--subject`, `--description-file`, `--append-description`, `--status`, `--tag`, `--add-tag`, `--remove-tag`, `--epic`, `--milestone`, `--swimlane`, `--clear-swimlane`, `--add-assignee`, `--remove-assignee`, `--owner-assignee`, `--block NOTE`, `--unblock` |
+| `taiga story update REF [flags]` | `--subject`, `--description-file`, `--append-description`, `--status`, `--tag`, `--add-tag`, `--remove-tag`, `--epic`, `--replace-epic` (com `--confirm-delete`), `--milestone`, `--swimlane`, `--clear-swimlane`, `--add-assignee`, `--remove-assignee`, `--owner-assignee`, `--block NOTE`, `--unblock` |
 | `taiga story close REF [--status NAME]` | Move para um status fechado. Não arquiva nem exclui |
 | `taiga story field list REF` | Valores dos campos customizados |
 | `taiga story field set REF "Nome"=valor...` | Grava com merge |
@@ -232,7 +232,7 @@ Flags comuns: `--project`, `--output`, `--dry-run` (em escritas).
 | Comando | Faz |
 |---|---|
 | `taiga epic list [--search] [--closed[=false]]` / `taiga epic get REF` | Épicos (com `url`) e detalhe com as stories vinculadas; recusados com `not_found` quando o módulo de épicos está desligado (a API continua servindo) |
-| `taiga epic link EPIC_REF STORY_REF` | Vínculo com stories (PR 253-2) |
+| `taiga epic link EPIC_REF STORY_REF [--replace --confirm-delete] [--dry-run]` | Acrescenta o épico aos da story; com `--replace`, cria o vínculo novo **antes** de apagar os outros (único `DELETE` curado, exige `--confirm-delete` também no `--dry-run`). Sem `version` no vínculo: releitura antes do `POST`, pós-condição depois, rerun converge (400 de duplicata e 404 de `DELETE` repetido contam como feitos após releitura). `--epic` em `story create/update` acrescenta; `story create --epic` que falha no vínculo sai `story_created_link_failed`, nomeando a story criada (PR 253-2) |
 | `taiga task list [--story REF] \| get \| create --story REF ... \| update \| close` | Tasks com os mesmos padrões de responsáveis, status, tags, `version` e campos |
 
 **Projeto como código:**

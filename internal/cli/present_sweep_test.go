@@ -31,6 +31,10 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 			st["color"] = sweepURL
 		}
 		f.swimlanes = []map[string]any{{"id": 21, "name": "lane " + sweepURL, "order": 1, "project": 37}}
+		for _, e := range f.epics {
+			e["subject"] = "epic " + sweepURL
+		}
+		f.stories[6808]["epics"] = []any{map[string]any{"id": 90, "ref": 9, "subject": "epic " + sweepURL, "project": map[string]any{"id": 37, "slug": "infra-2025"}}}
 		for _, e := range f.history[6808] {
 			e["user"] = user()
 			e["comment"] = "comment " + sweepURL
@@ -63,12 +67,39 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 		{"story", "update", "246", "--subject", "s"}, {"story", "update", "246", "--append-description", "x", "--dry-run"},
 		{"story", "close", "248", "--status", "Done"}, {"story", "comment", "246", "--body", sweepURL, "--dry-run"},
 		{"story", "comment", "246", "--body", sweepURL}, {"status", "list"}, {"field", "list", "--kind", "story"}, {"swimlane", "list"},
+		{"epic", "link", "91", "246"}, {"epic", "link", "91", "246", "--replace", "--confirm-delete"},
+		{"epic", "link", "91", "246", "--replace", "--confirm-delete", "--dry-run"}, {"epic", "link", "9", "246"},
+		{"story", "update", "246", "--subject", "s", "--epic", "91"}, {"story", "update", "246", "--replace-epic", "91", "--confirm-delete"},
+		{"story", "update", "246", "--subject", "s", "--replace-epic", "91", "--confirm-delete", "--dry-run"},
+		{"story", "create", "--subject", "s", "--epic", "91"}, {"story", "create", "--subject", "s", "--epic", "91", "--dry-run"},
 	} {
 		cases = append(cases, struct {
 			env   func() map[string]string
 			stdin string
 			args  []string
 		}{func() map[string]string { _, env := story(); return env }, "", args})
+	}
+	// Link failures echo Taiga's error body in the cause.
+	failing := func(request string, status int) func() map[string]string {
+		return func() map[string]string {
+			f, env := story()
+			f.fail[request], f.failBody = status, `{"_error_message": "denied `+sweepURL+`"}`
+			return env
+		}
+	}
+	for _, c := range []struct {
+		env  func() map[string]string
+		args []string
+	}{
+		{failing("POST epics/9/related_userstories", 403), []string{"story", "create", "--subject", "s", "--epic", "91"}},
+		{failing("POST epics/9/related_userstories", 502), []string{"story", "update", "246", "--subject", "s", "--epic", "91"}},
+		{failing("DELETE epics/90/related_userstories/6808", 502), []string{"epic", "link", "91", "246", "--replace", "--confirm-delete"}},
+	} {
+		cases = append(cases, struct {
+			env   func() map[string]string
+			stdin string
+			args  []string
+		}{c.env, "", c.args})
 	}
 	cases = append(cases, struct {
 		env   func() map[string]string
@@ -85,7 +116,8 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 			args  []string
 		}{catalog, "", args})
 	}
-	for _, args := range [][]string{{"project", "get"}, {"story", "get", "246"}, {"auth", "status"}} {
+	for _, args := range [][]string{{"project", "get"}, {"story", "get", "246"}, {"auth", "status"}, {"epic", "link", "9", "246"},
+		{"story", "update", "246", "--epic", "9"}, {"story", "create", "--subject", "s", "--epic", "9"}} {
 		cases = append(cases, struct {
 			env   func() map[string]string
 			stdin string

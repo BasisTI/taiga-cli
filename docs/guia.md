@@ -60,7 +60,7 @@ taiga story comments 246 --output text
 - Comentário: `story comment` publica o texto exatamente como veio (`--body`, ou `--body-file` com arquivo ou `-` para stdin), sem mexer na descrição; texto em branco é recusado. O Taiga aceita qualquer `version` antigo para comentário, então não há `--force-version` e o comentário é enviado uma vez só, nunca repetido. Se a resposta se perde (rede ou 5xx), a CLI procura o comentário no histórico: achou, sucesso; não achou ou não conseguiu ler, `comment_unconfirmed` (exit 1), porque o servidor pode gravar depois. Nesse caso, espere e confira com `taiga story comments` antes de publicar de novo. Exit 7 (`network_error`) só quando a conexão nem abriu: nada foi enviado.
 - `story comments` lista do mais novo para o mais antigo, inclusive comentários editados e apagados (`edit_comment_date`, `delete_comment_date`). Os comentários automáticos da integração GitLab do Taiga (usuário de sistema `gitlab-<hash>`, inativo, com os textos do push hook) ficam ocultos; `--include-system` os mostra. Comentários da conta de integração dos agentes são humanos e sempre aparecem.
 - Swimlanes: `taiga swimlane list` mostra as swimlanes do projeto na ordem do board, com `is_default` na padrão. `--swimlane` (nome ou id) move a story; `--clear-swimlane` tira a story de qualquer swimlane; `story list --swimlane A` e `story list --no-swimlane` filtram por elas. Story criada sem `--swimlane` fica sem swimlane, mesmo com uma padrão no projeto. Criar, renomear e reordenar swimlanes continua na interface web: exige admin, a primeira swimlane do projeto puxa todas as stories e a ordem não tem `version`.
-- Vincular story a épico (`--epic`) ainda não é suportado: o Taiga faz o vínculo por um recurso à parte, sem `version`, e trocar o vínculo exige `DELETE`. Use a interface web por enquanto.
+- Épico: `--epic REF` no `create` e no `update` **acrescenta** o vínculo (a story pode ter vários épicos); `--replace-epic REF --confirm-delete` no `update` **troca**: deixa só esse épico. Detalhes na seção "Vincular stories a épicos".
 
 ## Projetos, membros, milestones e épicos
 
@@ -77,7 +77,24 @@ taiga epic get 12 --output text         # descrição e stories vinculadas, na o
 
 - `--search` procura o texto nos nomes sem diferenciar maiúsculas, mas **sem** ignorar acento: `agil` não acha `Ágil`.
 - `epic get` lista em `user_stories` as stories vinculadas, inclusive de outro projeto (com `project_slug`); uma story que a conta não pode ler aparece só com o `id`.
-- Com o módulo de épicos desligado no projeto, `epic list` e `epic get` respondem `not_found` ("the epics module is disabled in this project"), embora a API do Taiga continue servindo os épicos.
+- Com o módulo de épicos desligado no projeto, `epic list`, `epic get` e `epic link` respondem `not_found` ("the epics module is disabled in this project"), embora a API do Taiga continue servindo os épicos.
+
+### Vincular stories a épicos
+
+```sh
+taiga epic link 12 246                                  # acrescenta o épico 12 à story 246
+taiga epic link 15 246 --replace --confirm-delete --dry-run   # mostra o POST e cada DELETE
+taiga epic link 15 246 --replace --confirm-delete       # deixa só o épico 15
+taiga story create --subject "Exportar CSV" --epic 12
+taiga story update 246 --replace-epic 15 --confirm-delete
+```
+
+- **Acrescentar × trocar.** Sem `--replace`/`--replace-epic`, o épico entra e os outros ficam. Com eles, a CLI **cria o vínculo novo antes** de apagar os antigos, para a story nunca ficar sem épico. É o único comando curado que manda `DELETE`, e por isso exige `--confirm-delete`, inclusive no `--dry-run`; sem a flag, sai `delete_not_confirmed` (exit 2) e nada é enviado.
+- O vínculo não tem `version` no Taiga. A CLI relê os épicos da story logo antes do `POST` (mudou desde a primeira leitura: `version_conflict`, nada enviado) e confere a story no fim (`epic_links_postcondition_failed`, exit 4, se não bater). Se outro épico aparecer entre o `POST` e os `DELETE`, a troca para antes de apagar.
+- **Rodar de novo é seguro.** O Taiga recusa vínculo duplicado e responde 404 a um `DELETE` repetido; a CLI confere pela releitura e trata os dois como feitos. Vínculo que já existe é no-op (`changed: false`). Se a resposta se perde, sai `epic_link_unconfirmed` ou `epic_replace_incomplete` (exit 1, com o que foi vinculado, removido e o que restou): rode **o mesmo comando** de novo para terminar.
+- **`story create --epic`**: a story já existe depois do `POST`. Se o vínculo falhar, sai `story_created_link_failed` (exit 1) com a ref da story criada; vincule com `taiga epic link EPIC REF` em vez de criar de novo. No `update` com outros campos, eles são gravados primeiro; se o vínculo falhar depois, sai `story_updated_link_failed` (exit 1, com o código original do vínculo na causa), dizendo que os campos foram gravados e apontando o `epic link`: não repita o `update`.
+- O épico é resolvido pela ref só no projeto selecionado, antes de qualquer escrita. O próprio Taiga aceitaria um épico de outro projeto.
+- Vincular exige a permissão `modify_epic` (sem ela, `forbidden`, exit 6); o `auth status --diagnose` mostra quando falta.
 - Links assinados de mídia (logo do projeto, foto de usuário) saem com o valor do token escondido, em qualquer texto, tags inclusive, e também quando a chave vem codificada (`%74oken=`, `t&#111;ken=`, `t&amp;#111;ken=`, `access_token=`) ou dentro do valor de outro parâmetro (`link=https://h/a?token=…`). Se o parâmetro de token só aparece depois de decodificar o texto e não dá para recortar o valor, ou se a decodificação de escapes `%` e entidades HTML ainda muda depois de 16 camadas, o texto inteiro vira `[redacted: the text carries a credential]`; texto que só menciona a palavra (`tokenizer=python`, `?q=token`) fica como está; e as credenciais do projeto (`*_csv_uuid`, que abre a exportação CSV sem autenticação, e `transfer_token`) nunca saem.
 
 ## Diagnóstico do projeto
