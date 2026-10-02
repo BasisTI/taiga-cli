@@ -247,22 +247,25 @@ func probeDownload(t *testing.T, uploadURL, freshURL, token string, content []by
 		q.Set("token", tok[:len(tok)-2]+"xx")
 	}
 	tampered.RawQuery = q.Encode()
-	for _, tc := range []struct{ name, url, auth string }{
-		{"token", noFrag.String(), ""},
-		{"token+Authorization", noFrag.String(), "Bearer " + token},
-		{"no token", noToken.String(), ""},
-		{"no token+Authorization", noToken.String(), "Bearer " + token},
-		{"tampered token", tampered.String(), ""},
-		{"upload-time url", strings.SplitN(uploadURL, "#", 2)[0], ""},
+	// The gateway of compose.test.yml serves the file only with a valid token; Authorization
+	// neither replaces nor spoils it.
+	for _, tc := range []struct {
+		name, url, auth string
+		want            int
+	}{
+		{"token", noFrag.String(), "", 200},
+		{"token+Authorization", noFrag.String(), "Bearer " + token, 200},
+		{"no token", noToken.String(), "", 403},
+		{"no token+Authorization", noToken.String(), "Bearer " + token, 403},
+		{"tampered token", tampered.String(), "", 403},
+		{"upload-time url", strings.SplitN(uploadURL, "#", 2)[0], "", 200},
 	} {
 		status, h, body := probeGet(t, tc.url, tc.auth)
-		t.Logf("FINDING download %s: HTTP %d content-type=%q location=%q matches=%v body=%.120q",
-			tc.name, status, h.Get("Content-Type"), h.Get("Location"), bytes.Equal(body, content), body)
-	}
-	// The same path under /media/ straight on the back, with the documented protected prefix.
-	for _, p := range []string{"/media/" + strings.TrimPrefix(u.Path, "/media/"), "/static/" + strings.TrimPrefix(u.Path, "/media/")} {
-		status, _, _ := probeGet(t, base.Scheme+"://"+base.Host+p, "")
-		t.Logf("FINDING download path %s: HTTP %d", p, status)
+		t.Logf("FINDING download %s: HTTP %d content-type=%q location=%q matches=%v",
+			tc.name, status, h.Get("Content-Type"), h.Get("Location"), bytes.Equal(body, content))
+		if status != tc.want || (tc.want == 200 && !bytes.Equal(body, content)) {
+			t.Errorf("download %s: HTTP %d, want %d (body %.120q)", tc.name, status, tc.want, body)
+		}
 	}
 }
 
