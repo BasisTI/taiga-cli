@@ -577,3 +577,69 @@ default, o `taiga-protected` e um gateway nginx (`taiga-gateway`) em `127.0.0.1:
 `taiga-protected`; `/_protected/` é `internal` e serve o volume `taiga-media`, compartilhado com o `taiga-back`.
 `client_max_body_size 50M`, igual ao proxy da Basis. A URL de teste continua `http://localhost:8000`, e a CI cobre o
 download e o 413.
+
+## Fase 3 — catálogos e épicos (US #253)
+
+Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 2026-10-02, com `admin` (superusuário,
+id 5 no seed atual) e `svc` (membro sem admin, convidado por e-mail) em projetos descartáveis criados pelo teste
+(`cli-test-probe-catalogs-<sufixo>`, `-alone-`, `-public-` e um criado pelo próprio `svc`). Teste em
+`internal/taiga/catalogs_probe_integration_test.go`: `go test -tags integration -run '^TestProbeCatalogs$' -v
+./internal/taiga`. Código lido no container: `taiga/projects/api.py` e `filters.py`, `milestones/api.py`,
+`epics/api.py`.
+
+### Projetos
+
+| Requisição | Resultado |
+|---|---|
+| `GET projects?member=<id de users/me>` | só os projetos de que a conta é membro, também para o superusuário. Na leitura da redação, `member=1` devolveu `[]` porque o id do `admin` é 5, não 1 |
+| `GET projects` sem `member` | tudo o que a conta **vê**: para `svc`, os projetos de que é membro **mais os públicos**; para o superusuário, **todos**, inclusive privados sem membership |
+| `GET projects/<id>` de projeto privado sem acesso | 403 |
+| `GET projects/by_slug?slug=` de projeto privado sem acesso | 404 |
+| `q=` | busca de texto completo (`to_tsquery` sobre nome, tags e descrição), não substring |
+| `GET projects/<id>` como membro | traz `i_am_member`, `i_am_admin`, `my_permissions`, `is_epics_activated`, `is_kanban_activated`, `is_backlog_activated`, `swimlanes`, `default_swimlane` |
+| `my_permissions` de `svc` com o papel padrão do template | `view_project`, `view_us`/`add_us`/`modify_us`/`comment_us`/`delete_us`, o mesmo para task, epic, issue, milestone e wiki; **sem** `admin_project_values` nem `admin_roles` |
+
+Consequência na CLI: `project list` manda `member=<id de users/me>` (a lista do superusuário seria o servidor inteiro)
+e `--search` filtra localmente por nome e slug, sem diferenciar maiúsculas; o `q` do servidor não é enviado, porque
+não é substring e esconderia resultados.
+
+### Paginação
+
+`x-disable-pagination: True` é respeitado por `projects`, `milestones` e `epics` (sem `x-pagination-next`).
+`Client.GetAll` continua seguindo o `x-pagination-next` se um dia vier.
+
+### Milestones
+
+| Requisição | Resultado |
+|---|---|
+| `GET milestones?project=` | `id`, `name`, `slug`, `estimated_start`, `estimated_finish`, `closed`, `order`, `owner`, `project`, `project_extra_info`, `total_points`, `closed_points`, `disponibility`, `created_date`, `modified_date` e `user_stories` (as stories inteiras do sprint; vazio aqui) |
+| `closed=true` / `closed=false` | respeitado |
+| `project__slug=` | respeitado |
+
+Consequência na CLI: `milestone list --closed` envia `closed` e confere localmente; a saída de texto mostra só as
+colunas curtas, o JSON leva o objeto inteiro.
+
+### Épicos
+
+| Requisição | Resultado |
+|---|---|
+| `GET epics?project=` | `id`, `ref`, `subject`, `status`, `status_extra_info` (`name`, `color`, `is_closed`), `is_closed`, `color`, `tags` (pares), `assigned_to`, `user_stories_counts`, `version`, sem `description` |
+| `GET epics/by_ref?project=&ref=` | o detalhe: os mesmos campos mais `description`, `description_html`, `comment`, `neighbors` |
+| `epics/by_ref` com o ref de uma **story** | 404 (ref de outro tipo não é épico) |
+| `GET epics/<id>/related_userstories` | lista com `user_story` (id), `epic` (id) e `order` (timestamp em ms) |
+| story vinculada | `GET userstories/<id>` traz `epics` como lista de `{id, ref, subject, color, project{id,name,slug}}` |
+| `status__is_closed=true\|false` | respeitado |
+| `q=` | respeitado, mas é busca de texto (ref ou palavras do assunto), não substring |
+| **módulo desligado** (`is_epics_activated: false`) | `epics`, `epics/by_ref` e `epics/<id>` continuam respondendo **200**, para `admin` e para `svc`: a chave só esconde o módulo na interface web; a API não a confere |
+
+Consequência na CLI: `epic list --closed` envia `status__is_closed` e confere localmente; `--search` filtra só
+localmente pelo assunto (o `q` do servidor não é substring). Como o servidor não recusa nada com o módulo desligado,
+`epic list` e `epic get` conferem `is_epics_activated` do projeto e recusam com `not_found` e a recuperação "the epics
+module is disabled in this project", que é o comportamento combinado no plano; `taiga api` continua lendo.
+
+### Usuários
+
+`GET memberships?project=` traz `user`, `full_name`, `role`, `role_name`, `is_admin`, `is_owner`, `is_user_active`,
+`user_email`, `email`, mas **não** o `username`. `GET users?project=` traz `username`, `full_name`,
+`full_name_display`, `is_active`, `roles`, mas lista também não membros (Fase 2). `user list` cruza os dois: só quem
+tem membership, com o `username` vindo de `users`.
