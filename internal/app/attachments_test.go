@@ -29,6 +29,7 @@ type attachAPI struct {
 	uploads   int
 	upload    func(a *attachAPI, path string, fields map[string]string, name string, content []byte) (*taiga.Response, error)
 	listErr   error // returned by the listing after the first upload
+	ctxCheck  bool  // the listing fails on a context that is done, like the real client
 	content   map[int64]string
 	downloads int
 }
@@ -55,7 +56,9 @@ func (f *attachAPI) store(path string, objectID int64, name, content string) Obj
 	f.nextID++
 	o := Object{"id": json.Number(fmt.Sprint(f.nextID)), "object_id": json.Number(fmt.Sprint(objectID)), "project": json.Number("37"), "name": name,
 		"size": json.Number(fmt.Sprint(len(content))), "sha1": sum(content), "description": "", "is_deprecated": false,
-		"url": fmt.Sprintf("http://taiga.test/media/attachments/x/%s?token=secret#_taiga-refresh=userstory:%d", name, f.nextID)}
+		"url":                fmt.Sprintf("http://taiga.test/media/attachments/x/%s?token=secret#_taiga-refresh=userstory:%d", name, f.nextID),
+		"preview_url":        "http://taiga.test/media/attachments/x/p?token=secret",
+		"thumbnail_card_url": "http://taiga.test/media/attachments/x/t.300x200.jpg?token=secret"}
 	f.stored[path] = append(f.stored[path], o)
 	f.content[f.nextID] = content
 	return o
@@ -79,7 +82,10 @@ func (f *attachAPI) Upload(_ context.Context, path string, fields map[string]str
 	return f.upload(f, path, fields, fileName, b)
 }
 
-func (f *attachAPI) GetAll(_ context.Context, path string, q url.Values) ([]json.RawMessage, error) {
+func (f *attachAPI) GetAll(ctx context.Context, path string, q url.Values) ([]json.RawMessage, error) {
+	if f.ctxCheck && ctx.Err() != nil {
+		return nil, &taiga.NetworkError{Method: "GET", Path: path, Err: ctx.Err()}
+	}
 	if f.uploads > 0 && f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -358,6 +364,8 @@ func TestDownloadSanitizesServerName(t *testing.T) {
 		{`a\b`, "b"},
 		{"\x1b]0;x\a", "_]0;x_"},
 		{"evil\u202etxt.exe", "evil_txt.exe"},
+		{".bash_profile", "_bash_profile"},
+		{"..hidden", "_.hidden"},
 		{"nul\x00byte", "nul_byte"},
 		{".", "attachment-7"},
 		{"..", "attachment-7"},
@@ -477,5 +485,68 @@ func TestTaskByRefChecksProject(t *testing.T) {
 	}
 	if _, err := s.Task(context.Background(), "0", 0); codeOf(err) != "usage" {
 		t.Fatalf("ref 0: %v", err)
+	}
+}
+
+// No signed link reaches the output: url, preview_url, thumbnail_card_url or any other value
+// that carries a token.
+func TestAttachmentViewDropsEverySignedURL(t *testing.T) {
+	f, s := newAttachAPI(t)
+	f.upload = accept
+	a := f.store("userstories/attachments", 6808, "a.txt", "a")
+	a["future_url"] = "http://taiga.test/media/x?token=secret"
+	list, err := s.Attachments(context.Background(), "story", story(t, s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, err := s.Upload(context.Background(), "story", story(t, s), writeFile(t, "b.txt", "b"), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.DownloadAttachment(context.Background(), "story", story(t, s), ID(a["id"]), "-", false, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []any{list, up, got} {
+		if b, _ := json.Marshal(v); strings.Contains(string(b), "token=") || strings.Contains(string(b), "secret") {
+			t.Fatalf("signed url in output: %s", b)
+		}
+	}
+}
+
+// Names Taiga does not store as sent would break the idempotence by name and sha1: refused.
+func TestUploadRefusesNamesTaigaRewrites(t *testing.T) {
+	f, s := newAttachAPI(t)
+	f.upload = accept
+	for _, name := range []string{"nl\r\nX.txt", `back\slash.txt`, "a&amp;b.txt", "a&#34;b.txt", "tab\tname.txt"} {
+		_, err := s.Upload(context.Background(), "story", story(t, s), writeFile(t, name, "x"), "", false)
+		if codeOf(err) != "usage" {
+			t.Fatalf("%q: %v", name, err)
+		}
+	}
+	for _, name := range []string{"a & b.txt", "relatório \"final\".txt", "50%.txt"} {
+		if _, err := s.Upload(context.Background(), "story", story(t, s), writeFile(t, name, name), "", false); err != nil {
+			t.Fatalf("%q: %v", name, err)
+		}
+	}
+	if f.uploads != 3 {
+		t.Fatalf("uploads=%d", f.uploads)
+	}
+}
+
+// The upload outlived its deadline: the check of the list still runs, on a context of its own.
+func TestUploadLostAnswerAfterDeadlineIsChecked(t *testing.T) {
+	f, s := newAttachAPI(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	owner := story(t, s)
+	f.upload = func(a *attachAPI, path string, fields map[string]string, name string, content []byte) (*taiga.Response, error) {
+		a.store(path, 6808, name, string(content))
+		cancel()
+		return nil, &taiga.NetworkError{Method: "POST", Path: path, Err: context.Canceled}
+	}
+	f.ctxCheck = true
+	got, err := s.Upload(ctx, "story", owner, writeFile(t, "r.txt", "content"), "", false)
+	if err != nil || got.(Object)["created"] != true {
+		t.Fatalf("%v %v", got, err)
 	}
 }

@@ -528,6 +528,7 @@ Campos `project`, `object_id`, `description` e o arquivo em `attached_file`.
 | sucesso | 201 com `id`, `name`, `size`, `sha1`, `url`, `object_id`, `project`, `order` (0), `is_deprecated` (false), `from_comment` (false), `description`, `created_date`, `owner`; **sem `version`**. `size` e `sha1` batem com os calculados localmente |
 | nome com acento, espaço ou aspas (`relatório final.txt`, `with "quotes".txt`) | `name` guardado como enviado; só o caminho do `url` é normalizado (`relatorio-final.txt`, `with-quotes.txt`) |
 | nome com diretório (`../x`, `dir/sub/inner.txt`) | `name` vira o basename (`x`, `inner.txt`) |
+| nome com CR/LF, barra invertida ou entidade HTML | gravado **diferente** do enviado: o Go codifica CR/LF (`%0D%0A`), o Django guarda só o que vem depois da `\` e faz unescape de entidades (`a&amp;b` → `a&b`). Como a idempotência compara nome e `sha1`, a CLI recusa esses nomes (`usage`, renomear o arquivo) |
 | arquivo vazio (0 byte) | **400** `{"attached_file": ["The submitted file is empty."]}` |
 | `object_id` de story de outro projeto, com `project` deste | 400 `Project ID does not match between object and project` (`WrongArguments`) |
 | `object_id` inexistente | 400 `Object id issue doesn't exist` |
@@ -547,7 +548,7 @@ O tamanho não tem limite no código do servidor; o limite vem do proxy. **No pr
 | `GET userstories/attachments?project=&object_id=` | só os anexos daquele objeto, em ordem de `id`; paginada (`x-paginated: true`, `x-pagination-count`) |
 | `GET tasks/attachments?project=&object_id=` | idem para a task; anexos de story não aparecem |
 | sem `object_id` | todos os anexos daquele tipo no projeto |
-| `GET <tipo>/attachments/<id>` | o anexo, com `url` assinado na hora (token novo a cada leitura em segundo diferente) |
+| `GET <tipo>/attachments/<id>` | o anexo, com `url` assinado na hora (token novo a cada leitura em segundo diferente). `preview_url` e, em imagem, `thumbnail_card_url` também levam token e abrem o arquivo (ou a miniatura) sem autenticação (revisão adversarial da #251); a CLI tira da saída toda chave terminada em `url` e todo texto com `token=` |
 | `GET tasks/attachments/<id de anexo de story>` | **200** com o anexo da story: o detalhe **não confere o tipo**. Conferir só o `object_id` não basta (id de story e de task podem coincidir); a CLI confere que o id está na **lista** do objeto, que filtra pelo tipo |
 
 ### Download: o `url`

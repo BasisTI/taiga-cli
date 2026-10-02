@@ -2,7 +2,10 @@ package cli
 
 import (
 	"context"
+	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/BasisTI/taiga-cli/internal/app"
@@ -22,6 +25,15 @@ func (a *App) attachmentCmd() *cobra.Command {
 	parent := &cobra.Command{Use: "attachment", Short: "List, upload and download attachments of stories and tasks"}
 	parent.AddCommand(a.attachmentListCmd(), a.attachmentUploadCmd(), a.attachmentDownloadCmd())
 	return parent
+}
+
+// transferContext bounds a transfer by timeout and cancels it on SIGINT or SIGTERM, so the
+// command can clean up (a download removes its temporary file; an upload checks the list)
+// before exiting, instead of being killed mid-way.
+func transferContext(parent context.Context, timeout time.Duration) (context.Context, func()) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	return ctx, func() { stop(); cancel() }
 }
 
 // attachmentOwner resolves REF as a story, or as a task with --task.
@@ -76,7 +88,7 @@ func (a *App) attachmentUploadCmd() *cobra.Command {
 		if timeout <= 0 {
 			return app.Usage("--timeout must be positive")
 		}
-		ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+		ctx, cancel := transferContext(cmd.Context(), timeout)
 		defer cancel()
 		service, err := a.service(cmd)
 		if err != nil {
@@ -127,7 +139,7 @@ func (a *App) attachmentDownloadCmd() *cobra.Command {
 		if dest == "" {
 			dest = a.Cwd
 		}
-		ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+		ctx, cancel := transferContext(cmd.Context(), timeout)
 		defer cancel()
 		service, err := a.service(cmd)
 		if err != nil {

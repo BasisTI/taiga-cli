@@ -12,7 +12,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -51,14 +53,16 @@ func (s *Service) attachments(ctx context.Context, path string, owner Object) ([
 	return out, nil
 }
 
-// attachmentView is the output form: the signed url is left out, because it opens the file
-// without authentication while its token lasts; `attachment download` is the way to the file.
+// attachmentView is the output form. Signed links (url, preview_url, thumbnail_card_url, or any
+// other string carrying a token) are left out: they open the file without authentication while
+// the token lasts; `attachment download` is the way to the file.
 func attachmentView(o Object) Object {
 	out := Object{}
 	for k, v := range o {
-		if k != "url" {
-			out[k] = v
+		if text, ok := v.(string); ok && (strings.HasSuffix(k, "url") || strings.Contains(text, "token=")) {
+			continue
 		}
+		out[k] = v
 	}
 	return out
 }
@@ -119,7 +123,21 @@ func localFile(path string) (UploadFile, error) {
 	if n == 0 {
 		return UploadFile{}, Usage(fmt.Sprintf("%s is empty: Taiga refuses empty attachments", path))
 	}
-	return UploadFile{Name: filepath.Base(path), Size: n, SHA1: hex.EncodeToString(h.Sum(nil))}, nil
+	name := filepath.Base(path)
+	if rewritten(name) {
+		return UploadFile{}, Usage(fmt.Sprintf("%q: Taiga does not store this file name as sent (control characters, a backslash or an HTML entity); rename the file", name))
+	}
+	return UploadFile{Name: name, Size: n, SHA1: hex.EncodeToString(h.Sum(nil))}, nil
+}
+
+// htmlEntity is what Django's multipart parser unescapes in a file name.
+var htmlEntity = regexp.MustCompile(`&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);`)
+
+// rewritten is a file name Taiga would store differently from what is sent: the multipart
+// encoder escapes CR and LF, Django keeps only what follows a backslash and unescapes HTML
+// entities. The stored name must be the local one, or the idempotence by name and sha1 breaks.
+func rewritten(name string) bool {
+	return strings.ContainsFunc(name, func(r rune) bool { return unicode.Is(unicode.Cc, r) || r == '\\' }) || htmlEntity.MatchString(name)
 }
 
 // sameFile is an attachment with the name and content of file.
@@ -189,6 +207,9 @@ func (s *Service) Upload(ctx context.Context, kind string, owner Object, path, d
 	return s.findUpload(ctx, endpoint, owner, file, known, err)
 }
 
+// checkTimeout bounds the list read that confirms an upload whose answer was lost.
+const checkTimeout = 30 * time.Second
+
 func created(o Object, isNew bool) Object {
 	out := attachmentView(o)
 	out["created"] = isNew
@@ -200,7 +221,11 @@ func created(o Object, isNew bool) Object {
 // an unknown outcome stays unknown (attachment_unconfirmed, exit 1), because the POST may still
 // be running on the server.
 func (s *Service) findUpload(ctx context.Context, endpoint string, owner Object, file UploadFile, known map[string]bool, sendErr error) (any, error) {
-	after, err := s.attachments(ctx, endpoint, owner)
+	// The upload may have failed because its context is done (--timeout, interrupt): the check
+	// gets a short deadline of its own, or it could never confirm a stored file.
+	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
+	defer cancel()
+	after, err := s.attachments(check, endpoint, owner)
 	if err == nil {
 		for _, o := range after {
 			if !known[fmt.Sprint(o["id"])] && sameFile(o, file) {
@@ -242,8 +267,8 @@ func (c *countingReader) Read(p []byte) (int, error) {
 }
 
 // safeName makes the attachment name from the server a local file name: only its last path
-// element, with controls, format characters (bidi) and separators replaced by "_"; ".", ".."
-// and an empty name become attachment-<id>.
+// element, with controls, format characters (bidi) and a leading dot replaced by "_"; ".",
+// ".." and an empty name become attachment-<id>.
 func safeName(name string, id int64) string {
 	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
 		name = name[i+1:]
@@ -256,6 +281,10 @@ func safeName(name string, id int64) string {
 	}, name)
 	if name == "" || name == "." || name == ".." {
 		return fmt.Sprintf("attachment-%d", id)
+	}
+	// A leading dot would plant a hidden file (.bashrc, .envrc) in the destination directory.
+	if strings.HasPrefix(name, ".") {
+		name = "_" + name[1:]
 	}
 	return name
 }

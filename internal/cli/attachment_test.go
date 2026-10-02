@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -226,5 +227,41 @@ func TestAttachmentTaskUsesTaskEndpoints(t *testing.T) {
 	_, stderr, code := runIn(t, f.env(), "", "attachment", "download", "250", "102", "--task", "--to", "-")
 	if code != 5 || !strings.Contains(stderr, "not_found") {
 		t.Fatalf("%d %s", code, stderr)
+	}
+}
+
+// An interrupt (SIGINT, SIGTERM) during a download cancels it and removes the temporary file.
+func TestAttachmentDownloadInterruptedLeavesNoTemp(t *testing.T) {
+	f, _ := newAttachmentFake(t)
+	a := f.add("userstories/attachments", 6808, "big.bin", strings.Repeat("x", 20))
+	started := make(chan struct{})
+	slow, _ := fakeTaiga(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/media/") {
+			f.handle(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, "xxxxxxxxxx")
+		w.(http.Flusher).Flush()
+		close(started)
+		<-r.Context().Done()
+	})
+	f.srv = slow.URL
+	a["url"] = slow.URL + "/media/attachments/101/f?token=secret-token"
+	dir := t.TempDir()
+	env := f.env()
+	env["HOME"] = t.TempDir()
+	var out, errOut strings.Builder
+	app := &App{In: strings.NewReader(""), Out: &out, Err: &errOut, Env: func(k string) string { return env[k] }, Cwd: dir}
+	done := make(chan int)
+	go func() { done <- app.Run([]string{"attachment", "download", "246", fmt.Sprint(a["id"]), "--to", dir}) }()
+	<-started
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if code := <-done; code == 0 {
+		t.Fatalf("interrupted download succeeded: %s", out.String())
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("leftovers: %v", entries)
 	}
 }
