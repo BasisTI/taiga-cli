@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -132,7 +131,7 @@ func (s *Service) Comment(ctx context.Context, ref, body string, dry bool) (any,
 	}
 	resp, err := confirmed(s.API.Do(ctx, taiga.Request{Method: "PATCH", Path: path, Body: map[string]any{"comment": body, "version": story["version"]}}))
 	if err != nil {
-		if notSent(err) || !unknownOutcome(err) {
+		if taiga.NotSent(err) || !unknownOutcome(err) {
 			var ae *taiga.APIError
 			if errors.As(err, &ae) && ae.IsVersionConflict() {
 				err = &taiga.ConflictError{Method: "PATCH", Path: path, Fields: []string{"comment"}}
@@ -165,18 +164,6 @@ func unknownOutcome(err error) bool {
 	var ne *taiga.NetworkError
 	var ae *taiga.APIError
 	return errors.As(err, &ne) || errors.As(err, &ae) && ae.Status >= 500
-}
-
-// notSent is a network error raised before the request could leave: the connection was
-// never opened (DNS failure, refused or unreachable). Nothing reached Taiga.
-func notSent(err error) bool {
-	var ne *taiga.NetworkError
-	if !errors.As(err, &ne) {
-		return false
-	}
-	var dns *net.DNSError
-	var op *net.OpError
-	return errors.As(err, &dns) || errors.As(err, &op) && op.Op == "dial"
 }
 
 // ownComments returns the ids of the comments of me with exactly body.

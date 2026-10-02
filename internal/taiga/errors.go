@@ -124,6 +124,11 @@ func ToOutput(err error) *output.Error {
 		}
 		return &output.Error{Code: "version_conflict", Source: "api", Stage: ce.Method + " " + stagePath(ce.Path), Cause: cause, Recovery: "re-read the resource and retry; use --force-version to override", Exit: output.ExitConflict}
 	}
+	var uu *UntrustedURLError
+	if errors.As(err, &uu) {
+		return &output.Error{Code: "attachment_url_untrusted", Source: "api", Stage: "GET " + uu.URL, Cause: uu.Error(),
+			Recovery: "do not retry: the server returned a download URL outside the Taiga URL; check the MEDIA_URL of the instance and the --url in use", Exit: output.ExitUnexpected}
+	}
 	var ae *APIError
 	if !errors.As(err, &ae) {
 		return output.AsError(err)
@@ -136,6 +141,8 @@ func ToOutput(err error) *output.Error {
 		e.Code, e.Exit, e.Recovery = "forbidden", output.ExitForbidden, "the account lacks permission for this operation"
 	case ae.Status == 404:
 		e.Code, e.Exit = "not_found", output.ExitNotFound
+	case ae.Status == 413:
+		e.Code, e.Exit, e.Recovery = "payload_too_large", output.ExitUsage, "the proxy in front of Taiga refuses a request this large (the Basis proxy accepts up to 50 MB); send a smaller file"
 	case ae.IsVersionConflict():
 		e.Code, e.Exit, e.Recovery = "version_conflict", output.ExitConflict, "re-read the resource and retry; with `taiga api`, include \"version\" or use --auto-version"
 	case ae.Status >= 300 && ae.Status < 400:

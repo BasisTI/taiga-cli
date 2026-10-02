@@ -109,7 +109,7 @@ func TestNotSent(t *testing.T) {
 		{"5xx", &taiga.APIError{Status: 503, Method: "PATCH", Path: "userstories/1"}, false},
 		{"dial outside a network error", &net.OpError{Op: "dial", Err: errors.New("x")}, false},
 	} {
-		if got := notSent(tc.err); got != tc.want {
+		if got := taiga.NotSent(tc.err); got != tc.want {
 			t.Fatalf("%s: %v", tc.name, got)
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 
@@ -24,6 +25,8 @@ type API interface {
 	GetAll(context.Context, string, url.Values) ([]json.RawMessage, error)
 	WriteVersioned(context.Context, string, string, map[string]any, bool) (*taiga.Response, error)
 	WriteVersionedFrom(context.Context, string, string, map[string]any, map[string]json.RawMessage, bool) (*taiga.Response, error)
+	Upload(ctx context.Context, path string, fields map[string]string, fileField, fileName string, r io.Reader, size int64) (*taiga.Response, error)
+	Download(ctx context.Context, rawURL string, w io.Writer) (int64, error)
 	BaseURL() string
 }
 

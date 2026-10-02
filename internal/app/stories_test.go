@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/url"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 
 // fakeAPI serves fixed JSON bodies by path and records every request.
 type fakeAPI struct {
+	noTransfer
 	objects map[string]string
 	lists   map[string]string
 	queries []url.Values
@@ -38,6 +40,17 @@ func (f *fakeAPI) WriteVersioned(context.Context, string, string, map[string]any
 
 func (f *fakeAPI) WriteVersionedFrom(context.Context, string, string, map[string]any, map[string]json.RawMessage, bool) (*taiga.Response, error) {
 	return nil, errors.New("unexpected write")
+}
+
+// noTransfer fails every upload and download; fakes of services that never transfer embed it.
+type noTransfer struct{}
+
+func (noTransfer) Upload(context.Context, string, map[string]string, string, string, io.Reader, int64) (*taiga.Response, error) {
+	return nil, errors.New("unexpected upload")
+}
+
+func (noTransfer) Download(context.Context, string, io.Writer) (int64, error) {
+	return 0, errors.New("unexpected download")
 }
 
 func (f *fakeAPI) BaseURL() string { return "http://taiga.test" }
