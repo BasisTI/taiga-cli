@@ -84,6 +84,10 @@ taiga epic get 12 --output text         # descrição e stories vinculadas, na o
 
 `taiga auth status --diagnose` termina com o check `project`: lê o projeto selecionado (só leitura) e mostra `id`, `slug`, a origem da seleção, se a conta é membro e admin, as permissões que faltam entre as que os comandos usam (`view_us`, `modify_us`, `add_us`, `comment_us`, `view_tasks`, `add_task`, `modify_task`, `modify_epic`, `admin_project_values`), os módulos de épicos, kanban e backlog e o número de swimlanes. Fica `skipped` sem projeto selecionado ou quando a identidade (`users/me`) falhou, e `failed` quando o projeto não pode ser lido: não existe, a conta não o vê, ou outro erro (rede, servidor) interrompeu a leitura. Permissão faltando não reprova o check; só avisa: sem `modify_epic`, vincular épico vai dar `forbidden`; sem `admin_project_values`, `project apply` também.
 
+## Fotos e outros links assinados
+
+Toda saída dos comandos curados (todos menos `taiga api`, que mostra a resposta do Taiga como veio) esconde o valor dos parâmetros de token, mantendo as chaves e o resto da URL. As fotos de usuário (`photo` e `big_photo` em `owner_extra_info`, `assigned_to_extra_info` e no autor dos comentários), o logo do projeto e os links de anexo são URLs assinadas de mídia que abrem o arquivo sem autenticação enquanto o token vale. Em `story get`, a foto sai como `"photo": "https://…/media/user/…?token=…"`.
+
 ## Anexos
 
 ```sh

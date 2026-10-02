@@ -46,8 +46,13 @@ var storyTextKeys = []string{"ref", "id", "version", "subject", "status", "is_cl
 
 func (a *App) renderCurated(v any) error { return a.renderKeys(v, storyTextKeys) }
 
-// renderKeys writes v as JSON, or in text as the given keys of each object.
+// renderKeys writes v as JSON, or in text as the given keys of each object. Objects read from
+// Taiga go through app.Scrub first: signed media URLs keep their key, not their token.
 func (a *App) renderKeys(v any, textKeys []string) error {
+	switch x := v.(type) {
+	case app.Object, []app.Object:
+		v = app.Scrub(x)
+	}
 	mode, err := output.DetectMode(a.output, a.OutTTY)
 	if err != nil {
 		return err

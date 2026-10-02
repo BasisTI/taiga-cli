@@ -101,8 +101,9 @@ func (a *App) renderStoryFields(ctx context.Context, service *app.Service, story
 		return err
 	}
 	fields := app.FieldsView(values, defs)
-	result := app.Object{"id": story["id"], "ref": story["ref"], "url": view["url"], "version": values["version"],
-		"attributes_values": values["attributes_values"], "fields": fields}
+	result := app.Scrub(app.Object{"id": story["id"], "ref": story["ref"], "url": view["url"], "version": values["version"],
+		"attributes_values": values["attributes_values"], "fields": fields}).(app.Object)
+	fields, _ = result["fields"].([]app.Object)
 	mode, err := output.DetectMode(a.output, a.OutTTY)
 	if err != nil {
 		return err
@@ -121,7 +122,7 @@ func (a *App) renderStoryFields(ctx context.Context, service *app.Service, story
 		}
 		lines = append(lines, output.Field{Key: fmt.Sprintf("%s (%s)", jsonValue(f["name"]), jsonValue(f["type"])), Value: value})
 	}
-	stored, _ := values["attributes_values"].(map[string]any)
+	stored, _ := result["attributes_values"].(map[string]any)
 	for _, id := range sortedKeys(stored) {
 		if !known[id] {
 			lines = append(lines, output.Field{Key: "#" + id + " (no definition)", Value: jsonValue(stored[id])})

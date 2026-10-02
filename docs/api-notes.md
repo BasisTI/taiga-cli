@@ -646,3 +646,11 @@ module is disabled in this project", que é o comportamento combinado no plano; 
 `user_email`, `email`, mas **não** o `username`. `GET users?project=` traz `username`, `full_name`,
 `full_name_display`, `is_active`, `roles`, mas lista também não membros (Fase 2). `user list` cruza os dois: só quem
 tem membership, com o `username` vindo de `users`.
+
+**Fotos de usuário.** `photo` e `big_photo` (em `users`, `owner_extra_info`, `assigned_to_extra_info`,
+`assigned_users_extra_info`, o `user` do histórico) são URLs assinadas de mídia,
+`<TAIGA_URL>/media/user/…/<arquivo>.80x80_q85_crop.jpg?token=<assinatura>` (e `300x300` na `big_photo`), que abrem o
+arquivo **sem autenticação**: confirmado em produção pelo Cedric em 2026-10-02 (`story get 251`, só leitura) e no
+Taiga local, onde o seed não tem foto e o teste `TestIntegrationStoryOutputsHideUserPhotos` põe um avatar no `svc`
+(`POST users/change_avatar`, multipart `avatar`) e o tira no fim (`POST users/remove_avatar`). Toda saída curada passa
+por `app.Scrub`: as chaves e a URL ficam, o valor do token vira `…`.

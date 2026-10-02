@@ -16,11 +16,28 @@ import (
 // they print goes through scrub: project logos, user photos and attachment links are signed
 // media URLs whose token opens the file without authentication.
 
-// scrub returns a deep copy of v with the value of every token= parameter hidden.
+// Scrub returns a deep copy of v with the value of every token parameter hidden, in every
+// string at any depth (taiga.RedactTokens). Keys and other values stay. Every curated output
+// goes through it: user photos (owner_extra_info, assigned_to_extra_info, the history user),
+// project logos and attachment links are signed media URLs that open without authentication.
+func Scrub(v any) any { return scrub(v) }
+
 func scrub(v any) any {
 	switch x := v.(type) {
 	case string:
 		return taiga.RedactTokens(x)
+	case []string:
+		out := make([]string, len(x))
+		for i, e := range x {
+			out[i] = taiga.RedactTokens(e)
+		}
+		return out
+	case []Object:
+		out := make([]Object, len(x))
+		for i, e := range x {
+			out[i] = scrub(e).(Object)
+		}
+		return out
 	case Object:
 		out := Object{}
 		for k, e := range x {

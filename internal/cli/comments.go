@@ -78,6 +78,7 @@ var commentTextKeys = []string{"id", "created_at", "author", "is_system", "edite
 // renderComments writes the history entries as JSON, or in text one block per comment with
 // the author's username and the edit/delete dates when there are any.
 func (a *App) renderComments(items []app.Object) error {
+	items = app.Scrub(items).([]app.Object) // the history user carries a signed photo
 	mode, err := output.DetectMode(a.output, a.OutTTY)
 	if err != nil {
 		return err
