@@ -36,15 +36,16 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 
 | Command | What it does |
 |---|---|
-| `taiga story list [--ref N] [--status S] [--assignee USER\|me] [--epic REF] [--tag T]... [--search TEXT] [--closed[=false]]` | Every matching story, without manual paging. Repeated `--tag` must all match |
+| `taiga story list [--ref N] [--status S] [--assignee USER\|me] [--epic REF] [--swimlane L\|--no-swimlane] [--tag T]... [--search TEXT] [--closed[=false]]` | Every matching story, without manual paging. Repeated `--tag` must all match |
 | `taiga story get REF` / `taiga story get --id ID` | One story, with its web `url`; JSON output also carries `custom_attributes` (values with their own `version`) |
 | `taiga story create --subject S [--description-file F\|-] [--status S] [--tag T]... [--swimlane L] [--assignee USER]...` | Create a story |
-| `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L] [--add-assignee USER]... [--remove-assignee USER]... [--owner-assignee USER\|--clear-owner-assignee] [--block NOTE\|--unblock]` | Send only the fields that change, with the story `version` |
+| `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L\|--clear-swimlane] [--add-assignee USER]... [--remove-assignee USER]... [--owner-assignee USER\|--clear-owner-assignee] [--block NOTE\|--unblock]` | Send only the fields that change, with the story `version` |
 | `taiga story close REF [--status S]` | Move to a closed status; never archives or deletes |
 | `taiga story field list REF` | The story's custom field values next to their definitions |
 | `taiga story field set REF ["Name=value"]... [--unset NAME]...` | Merge custom field values: named fields change, the others stay |
 | `taiga story comment REF --body TEXT\|--body-file F\|-` | Publish a comment (Markdown); sent once, never repeated |
 | `taiga story comments REF [--include-system]` | The story's comments, newest first |
+| `taiga swimlane list` | The project's swimlanes in board order, with `is_default` |
 
 - Statuses, milestones and swimlanes take a name or an id of the project; users take an exact username, an id or `me`, and must be project members. A name used twice is `ambiguous_name`.
 - `--tag` replaces the tags; `--add-tag`/`--remove-tag` merge with the current ones. Taiga stores tags in lower case, so the CLI sends them that way.
@@ -52,6 +53,7 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 - `--remove-assignee` also takes users who left the project. A write that changes assignees is not retried after a version conflict (exit 4; run it again, or use `--force-version`).
 - Taiga's concurrency check does not cover the main assignee (`assigned_to`). The CLI re-reads the assignees right before writing (a change since the first read is `version_conflict`) and checks the story after writing; a mismatch is `assignees_postcondition_failed` (exit 4): the write **was applied**, so check the story instead of re-running. A concurrent change in the short window between that re-read and the write is detected, not prevented. See [docs/api-notes.md](docs/api-notes.md).
 - `--block NOTE` sets `is_blocked` with the note (required); `--unblock` clears both.
+- Swimlanes: `--swimlane` moves the story to a swimlane, `--clear-swimlane` takes it out of any; `story list --swimlane L` and `--no-swimlane` filter by it (always checked locally: Taiga ignores the documented `swimlane` parameter). A story created without `--swimlane` stays without one, even when the project has a default swimlane. Creating, renaming and reordering swimlanes stay in the web UI: the first swimlane of a project takes every story, and the order has no `version`.
 - `close` without `--status` uses the project's only closed status; with several (the default template has `Done` and `Archived`) it asks for one.
 - Every write accepts `--dry-run` (prints method, path and body) and, except `create`, `--force-version`.
 - `comment` sends the text exactly as given (quotes, accents, line breaks) and never touches the description. A blank comment is refused. Taiga accepts any past `version` for a comment, so the version protects nothing there and there is no `--force-version`: the comment is sent once. If the answer is lost (network error or 5xx), the CLI looks for it in the story history: found, the command succeeds; otherwise it exits with `comment_unconfirmed` (exit 1), because a request still running on the server can land later. Check `story comments` before publishing again. Exit 7 (`network_error`) means the connection never opened, so nothing was sent.
