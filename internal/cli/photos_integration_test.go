@@ -110,6 +110,20 @@ func TestIntegrationStoryOutputsHideUserPhotos(t *testing.T) {
 		}
 	}
 
+	// stderr: a date field given the signed photo is refused, and the error hides the token.
+	storyJSON(t, env, "", "field", "create", "--kind", "story", "--name", "Entrega", "--type", "date")
+	for _, mode := range []string{"json", "text"} {
+		out, errOut, code := runIn(t, svc, "", "story", "field", "set", ref, "Entrega="+me.Photo, "--output", mode)
+		if code != 2 || out != "" || !strings.Contains(errOut, "token=…") {
+			t.Fatalf("date field with the photo (%s): exit %d, stdout %d bytes, stderr %d bytes", mode, code, len(out), len(errOut))
+		}
+		for _, tok := range tokens {
+			if strings.Contains(errOut, tok) || strings.Contains(errOut, url.QueryEscape(tok)) {
+				t.Fatalf("stderr (%s) printed the photo token", mode)
+			}
+		}
+	}
+
 	got := storyJSON(t, svc, "", "story", "get", ref)
 	owner, _ := got["owner_extra_info"].(map[string]any)
 	photo, _ := owner["photo"].(string)
