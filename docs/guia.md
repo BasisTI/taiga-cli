@@ -39,6 +39,9 @@ taiga story get 246
 taiga story create --subject "Nova story" --tag cli --description-file descricao.md
 taiga story update 246 --status "In progress" --add-tag cli --milestone "Sprint 12"
 taiga story update 246 --append-description "Entregue em staging."
+taiga swimlane list --output text
+taiga story update 246 --swimlane Expedite
+taiga story list --no-swimlane
 taiga story update 247 --add-assignee me --add-assignee fulano --block "aguardando revisão da B6"
 taiga story update 247 --remove-assignee fulano --unblock
 taiga story close 246 --status Done
@@ -56,6 +59,7 @@ taiga story comments 246 --output text
 - `close` só muda o status para um status fechado: não arquiva nem exclui. No template padrão há dois status fechados (`Done` e `Archived`), então informe `--status`.
 - Comentário: `story comment` publica o texto exatamente como veio (`--body`, ou `--body-file` com arquivo ou `-` para stdin), sem mexer na descrição; texto em branco é recusado. O Taiga aceita qualquer `version` antigo para comentário, então não há `--force-version` e o comentário é enviado uma vez só, nunca repetido. Se a resposta se perde (rede ou 5xx), a CLI procura o comentário no histórico: achou, sucesso; não achou ou não conseguiu ler, `comment_unconfirmed` (exit 1), porque o servidor pode gravar depois. Nesse caso, espere e confira com `taiga story comments` antes de publicar de novo. Exit 7 (`network_error`) só quando a conexão nem abriu: nada foi enviado.
 - `story comments` lista do mais novo para o mais antigo, inclusive comentários editados e apagados (`edit_comment_date`, `delete_comment_date`). Os comentários automáticos da integração GitLab do Taiga (usuário de sistema `gitlab-<hash>`, inativo, com os textos do push hook) ficam ocultos; `--include-system` os mostra. Comentários da conta de integração dos agentes são humanos e sempre aparecem.
+- Swimlanes: `taiga swimlane list` mostra as swimlanes do projeto na ordem do board, com `is_default` na padrão. `--swimlane` (nome ou id) move a story; `--clear-swimlane` tira a story de qualquer swimlane; `story list --swimlane A` e `story list --no-swimlane` filtram por elas. Story criada sem `--swimlane` fica sem swimlane, mesmo com uma padrão no projeto. Criar, renomear e reordenar swimlanes continua na interface web: exige admin, a primeira swimlane do projeto puxa todas as stories e a ordem não tem `version`.
 - Vincular story a épico (`--epic`) ainda não é suportado: o Taiga faz o vínculo por um recurso à parte, sem `version`, e trocar o vínculo exige `DELETE`. Use a interface web por enquanto.
 
 ## Campos customizados

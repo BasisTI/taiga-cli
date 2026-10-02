@@ -142,6 +142,9 @@ type storyFake struct {
 	afterComment   func()
 	// afterHistory runs after the first page of each history read of a story is answered.
 	afterHistory func(id int64)
+	// swimlanes is the swimlane catalog; defaultSwimlane is the project's default_swimlane.
+	swimlanes       []map[string]any
+	defaultSwimlane any
 }
 
 // cut answers status with a Content-Length it does not honour, so the client sees the status
@@ -240,7 +243,9 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == "GET" && (path == "projects/37" || path == "projects/by_slug" && q.Get("slug") == f.slug):
-		f.write(w, map[string]any{"id": 37, "slug": f.slug})
+		f.write(w, map[string]any{"id": 37, "slug": f.slug, "default_swimlane": f.defaultSwimlane})
+	case r.Method == "GET" && path == "swimlanes" && project():
+		f.list(w, r, f.swimlanes)
 	case r.Method == "GET" && path == "userstory-statuses" && project():
 		f.list(w, r, f.statuses)
 	case r.Method == "GET" && path == "users" && project():

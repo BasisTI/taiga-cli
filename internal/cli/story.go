@@ -79,9 +79,9 @@ func (a *App) storyGetCmd() *cobra.Command {
 }
 
 func (a *App) storyListCmd() *cobra.Command {
-	var ref, status, assignee, epic, search string
+	var ref, status, assignee, epic, search, swimlane string
 	var tags []string
-	var closed bool
+	var closed, noSwimlane bool
 	cmd := &cobra.Command{Use: "list", Short: "List every matching story", Args: cobra.NoArgs}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		if cmd.Flags().Changed("ref") {
@@ -89,10 +89,13 @@ func (a *App) storyListCmd() *cobra.Command {
 				return err
 			}
 		}
-		for _, name := range []string{"status", "assignee", "epic", "search"} {
+		for _, name := range []string{"status", "assignee", "epic", "search", "swimlane"} {
 			if cmd.Flags().Changed(name) && strings.TrimSpace(cmd.Flags().Lookup(name).Value.String()) == "" {
 				return app.Usage("--" + name + " cannot be blank")
 			}
+		}
+		if cmd.Flags().Changed("swimlane") && noSwimlane {
+			return app.Usage("choose --swimlane or --no-swimlane")
 		}
 		names, err := tagNames("--tag", tags)
 		if err != nil {
@@ -138,6 +141,16 @@ func (a *App) storyListCmd() *cobra.Command {
 			}
 			q.Set("epic", strconv.FormatInt(app.ID(e["id"]), 10))
 		}
+		if swimlane != "" {
+			id, err := a.resolveStoryValue(cmd, service, "swimlane", swimlane)
+			if err != nil {
+				return err
+			}
+			q.Set("swimlane", strconv.FormatInt(app.ID(id), 10))
+		}
+		if noSwimlane {
+			q.Set("swimlane", "null")
+		}
 		result, err := service.Stories(ctx, q)
 		if err != nil {
 			return err
@@ -151,6 +164,8 @@ func (a *App) storyListCmd() *cobra.Command {
 	f.StringVar(&epic, "epic", "", "epic reference")
 	f.StringArrayVar(&tags, "tag", nil, "required tag, repeatable (all must match)")
 	f.StringVar(&search, "search", "", "case-insensitive text in the subject")
+	f.StringVar(&swimlane, "swimlane", "", "swimlane name or id")
+	f.BoolVar(&noSwimlane, "no-swimlane", false, "only stories without a swimlane")
 	f.BoolVar(&closed, "closed", false, "only closed stories; --closed=false for open ones")
 	return cmd
 }
@@ -347,6 +362,10 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 				return app.Usage("--" + name + " cannot be blank")
 			}
 		}
+		clearSwimlane, _ := f.GetBool("clear-swimlane")
+		if f.Changed("swimlane") && clearSwimlane {
+			return app.Usage("choose --swimlane or --clear-swimlane")
+		}
 		if f.Changed("epic") {
 			return errEpicLink
 		}
@@ -384,6 +403,9 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 			}
 			patch.Set[pair[0]] = value
 		}
+		if clearSwimlane {
+			patch.Set["swimlane"] = nil
+		}
 		if err := resolveAssignees(cmd, service, &patch, update); err != nil {
 			return err
 		}
@@ -408,6 +430,7 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 	if update {
 		f.StringVar(&appendText, "append-description", "", "append text to the description, after a blank line")
 		f.StringVar(&milestone, "milestone", "", "milestone (sprint) name or id")
+		f.Bool("clear-swimlane", false, "remove the story from its swimlane")
 		f.StringArrayVar(&addTags, "add-tag", nil, "add a tag, repeatable")
 		f.StringArrayVar(&removeTags, "remove-tag", nil, "remove a tag, repeatable")
 	}

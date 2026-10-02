@@ -14,7 +14,8 @@ Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 202
 | Paginação | `?page=N`; o próximo vem em `X-Pagination-Next` | sondagem manual da US #245 |
 | Application tokens para conta de serviço | não validado na fase 1: exige cadastrar uma Application pelo admin do Django; fica para quando houver demanda | — |
 | `userstories/by_ref?ref=&project=` | validado na fase 2; ver seção abaixo | `TestProbeStoryByRef` |
-| Escrita de swimlane, upload de anexo | fases 2 e 3 | — |
+| Swimlanes: catálogo, primeira swimlane, `swimlane` na story, filtro da listagem, permissão | validado na fase 3; ver "swimlanes" | `TestProbeSwimlaneContract` |
+| Upload de anexo | fase 3 | — |
 | Comentários (`PATCH {comment, version}`, `history/userstory`, integração GitLab) | validado na fase 2; ver "comentários" | `TestProbeCommentContract`, `TestProbeCommentHistoryPages`, `TestIntegrationStoryComments` |
 | Relação `assigned_to` × `assigned_users`, bloqueio | validado na fase 2; ver "responsáveis e bloqueio" | `TestProbeStoryAssignees`, `TestProbeStoryBlock` |
 | Campos customizados (definições e valores) de story e task | validado na fase 2; ver "campos customizados" | `TestProbeFieldDefinitions`, `TestProbeFieldValues`, `TestProbeTaskFieldValues`, `TestProbeFieldValuesUnset` |
@@ -461,3 +462,49 @@ Testes: `TestStatusWriterReorder*` (unidade), `TestIntegrationProjectApplyBasisE
 `TestIntegrationProjectReorderRefusesAMovedOrder` e `TestIntegrationProjectReorderPostcondition` (corridas via
 proxy). OCC de verdade continua dependendo do servidor (por exemplo `version` em status ou no projeto, respeitado
 pelo `bulk_update_order`).
+
+## Fase 3 — swimlanes (US #252)
+
+Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 2026-10-02, com `admin` em dois
+projetos descartáveis criados pelo teste (`cli-test-probe-swimlanes-<sufixo>` e `cli-test-probe-swimlanes-other-<sufixo>`),
+com `svc` como membro sem admin, convidado por e-mail. Teste em
+`internal/taiga/swimlanes_probe_integration_test.go`: `go test -tags integration -run '^TestProbeSwimlaneContract$' -v
+./internal/taiga`. Código lido no container: `taiga/projects/api.py` (`SwimlaneViewSet`), `signals.py`,
+`userstories/api.py` e `userstories/filters.py`.
+
+### Catálogo
+
+| Requisição | Resultado |
+|---|---|
+| `GET swimlanes?project=<id>` | lista com `id`, `name`, `order`, `project`, `statuses` (com `wip_limit` por swimlane), ordenada por `order`; **sem `version`** |
+| projeto sem swimlanes | lista vazia; em `GET projects/<id>`, `swimlanes` e `default_swimlane` vêm `null` (não `[]`) |
+| `POST swimlanes` | `order` padrão cresce (timestamp): a nova vai para o fim; mesmo nome no mesmo projeto → 400 |
+| **primeira** swimlane do projeto | vira `default_swimlane` e **todas** as stories do projeto passam para ela, por `UPDATE` em lote: a `version` das stories **não muda** |
+| segunda swimlane em diante | não muda a padrão nem as stories |
+| membro sem admin (`svc`) | lê o catálogo (200); `POST swimlanes` → 403 |
+
+### `swimlane` na story
+
+| Requisição | Resultado |
+|---|---|
+| story criada sem `swimlane` num projeto que já tem swimlanes | fica com `swimlane: null`; a padrão **não** é aplicada na criação |
+| `PATCH {swimlane: <id>, version}` e `{swimlane: null, version}` | gravados, `version` +1; a releitura confirma |
+| membro sem admin | move a story de swimlane (é campo da story, não escrita de swimlane) |
+| swimlane de outro projeto | 403 (`You don't have permissions to set this swimlane`) |
+| id inexistente | 400 em `swimlane` |
+| `version` antiga com campo disjunto alterado desde então | aceito; com `swimlane` alterado desde então, 400 em `version` (OCC por campo, como nos demais) |
+
+### Filtro da listagem
+
+| Parâmetro de `GET userstories?project=<id>` | Resultado |
+|---|---|
+| `swimlane=<id>` ou `swimlane=null` | **ignorado** (lista tudo), como já visto na #246 |
+| `swimnlane=<id>` | respeitado: o filtro do servidor (`SwimlanesFilter`) lê o parâmetro com esse erro de digitação |
+| `swimnlane=null` | respeitado: só as stories sem swimlane |
+
+Consequência na CLI: `story list --swimlane`/`--no-swimlane` mandam `swimnlane` para encurtar a lista e **sempre**
+filtram localmente depois do `GetAll`; se uma versão futura corrigir o nome do parâmetro, o servidor passa a ignorá-lo e
+o resultado continua certo. `--no-swimlane` é uma flag própria, sem valor mágico (`none` pode ser nome real).
+`--clear-swimlane` em `story update` envia `{swimlane: null, version}` pelo caminho versionado normal. Criar, renomear,
+reordenar e apagar swimlanes ficam fora da CLI (decisão de 2026-10-01): exigem admin, a primeira move todas as stories
+sem passar pelo OCC, e a ordem não tem `version`.

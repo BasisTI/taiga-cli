@@ -200,17 +200,17 @@ Flags comuns: `--project`, `--output`, `--dry-run` (em escritas).
 | `taiga project list\|get` | Projetos acessíveis e detalhe |
 | `taiga user list [--search]` | Usuários do projeto |
 | `taiga status list [--kind story\|task]` | Status do projeto |
-| `taiga swimlane list` | Swimlanes do projeto |
+| `taiga swimlane list` | Swimlanes do projeto, na ordem do board, com `is_default`; só leitura (criar, renomear e reordenar ficam na interface web) |
 | `taiga milestone list` | Sprints |
 
 **Stories:**
 
 | Comando | Faz |
 |---|---|
-| `taiga story list [--status] [--assignee] [--epic] [--tag] [--search] [--closed]` | Listagem sem paginação manual |
+| `taiga story list [--status] [--assignee] [--epic] [--swimlane\|--no-swimlane] [--tag] [--search] [--closed]` | Listagem sem paginação manual; o filtro de swimlane é sempre conferido localmente |
 | `taiga story get REF\|--id ID` | Detalhe com `url`, campos customizados e bloqueio |
 | `taiga story create --subject S [--description-file F] [--status] [--tag]... [--assignee]... [--epic] [--swimlane]` | Criação |
-| `taiga story update REF [flags]` | `--subject`, `--description-file`, `--append-description`, `--status`, `--tag`, `--add-tag`, `--remove-tag`, `--epic`, `--milestone`, `--swimlane`, `--add-assignee`, `--remove-assignee`, `--owner-assignee`, `--block NOTE`, `--unblock` |
+| `taiga story update REF [flags]` | `--subject`, `--description-file`, `--append-description`, `--status`, `--tag`, `--add-tag`, `--remove-tag`, `--epic`, `--milestone`, `--swimlane`, `--clear-swimlane`, `--add-assignee`, `--remove-assignee`, `--owner-assignee`, `--block NOTE`, `--unblock` |
 | `taiga story close REF [--status NAME]` | Move para um status fechado. Não arquiva nem exclui |
 | `taiga story field list REF` | Valores dos campos customizados |
 | `taiga story field set REF "Nome"=valor...` | Grava com merge |

@@ -125,10 +125,12 @@ func (s *Service) Epic(ctx context.Context, ref string) (Object, error) {
 }
 
 // remoteFilters maps the list filters to the query parameters the probe proved Taiga honours.
-var remoteFilters = map[string]string{"status": "status", "assignee": "assigned_users", "epic": "epic", "closed": "status__is_closed"}
+// Taiga 6.7 reads the swimlane filter from the misspelled "swimnlane" and ignores "swimlane"
+// (docs/api-notes.md); the local check stays the rule if a later version renames it.
+var remoteFilters = map[string]string{"status": "status", "assignee": "assigned_users", "epic": "epic", "closed": "status__is_closed", "swimlane": "swimnlane"}
 
 // Stories lists every story of the project matching filters (keys: ref, status, closed,
-// search, assignee, epic, tag; ids already resolved). Proven filters go to Taiga to shorten
+// search, assignee, epic, swimlane, tag; ids already resolved, swimlane "null" for none). Proven filters go to Taiga to shorten
 // the list; every filter is then checked locally, so an ignored parameter never widens it.
 func (s *Service) Stories(ctx context.Context, filters url.Values) ([]Object, error) {
 	q := url.Values{"project": {s.projectID()}}
@@ -149,6 +151,9 @@ func (s *Service) Stories(ctx context.Context, filters url.Values) ([]Object, er
 		}
 		if ID(o["project"]) != ID(s.Project["id"]) {
 			return nil, fmt.Errorf("list returned another project")
+		}
+		if _, ok := o["swimlane"]; !ok && filters.Has("swimlane") {
+			return nil, fmt.Errorf("list returned a story without the swimlane field")
 		}
 		view, err := s.StoryView(o)
 		if err != nil {
@@ -182,6 +187,15 @@ func matches(o Object, filters url.Values) bool {
 		return ok && fmt.Sprint(e["id"]) == v
 	}) {
 		return false
+	}
+	if v := filters.Get("swimlane"); v != "" {
+		lane := "null"
+		if o["swimlane"] != nil {
+			lane = fmt.Sprint(o["swimlane"])
+		}
+		if lane != v {
+			return false
+		}
 	}
 	names, _ := o["tags"].([]string)
 	for _, wanted := range filters["tag"] {
