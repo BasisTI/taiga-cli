@@ -5,12 +5,13 @@ import (
 	"strings"
 )
 
-// redactedWhole replaces a text in which a token shows up only once decoded, where its value
-// cannot be cut out of the original safely.
+// redactedWhole replaces a text that cannot be shown safely: a token shows up only once it is
+// decoded, where its value cannot be cut out of the original, or the decoding never settles.
 const redactedWhole = "[redacted: the text carries a credential]"
 
-// maxDecodings bounds the layers of HTML entities and percent escapes undone.
-const maxDecodings = 8
+// maxDecodings bounds the layers of HTML entities and percent escapes undone. A text still
+// changing after that many is not shown (fail closed), whatever it holds.
+const maxDecodings = 16
 
 // RedactTokens hides the value of every token parameter in s, keeping the rest of the text:
 // read output keeps the URLs users wrote, but never a signed link's credential.
@@ -20,12 +21,19 @@ const maxDecodings = 8
 // characters right before the '=', compared after undoing HTML entities and percent escapes
 // (%74oken, t&#111;ken, t&amp;#111;ken), in any case, and anything ending in "token" counts
 // (access_token). The value runs to the next delimiter. Then every decoding of the result is
-// checked again: if a token value still shows up, the whole text is replaced (fail closed).
+// checked again: if a key ending in "token" still has a value there, the whole text is
+// replaced. So is a text whose decoding does not settle within maxDecodings layers.
+//
+// The cost is linear in len(s) times the layers: keys are disjoint runs, and the end of a
+// value is only looked for after a token key, whose value is then skipped.
 func RedactTokens(s string) string {
+	if _, settled := decodings(s); !settled {
+		return redactedWhole
+	}
 	out := redactValues(s)
-	layers := decodings(out)
-	if len(layers) > maxDecodings && strings.Contains(strings.ToLower(layers[len(layers)-1]), "token") {
-		return redactedWhole // still changing after the limit: no layer can be trusted
+	layers, settled := decodings(out)
+	if !settled {
+		return redactedWhole
 	}
 	for _, layer := range layers {
 		if hasTokenValue(layer) {
@@ -47,19 +55,26 @@ func redactValues(s string) string {
 		for start > 0 && encodedKeyByte(s[start-1]) {
 			start--
 		}
+		if start == i || !tokenKey(s[start:i]) {
+			continue
+		}
 		end := valueEnd(s, i+1)
-		if start == i || end == i+1 || !tokenKey(s[start:i]) {
+		if end == i+1 {
 			continue
 		}
 		b.WriteString(s[last : i+1])
 		b.WriteString("…")
 		last, i = end, end-1
 	}
+	if last == 0 {
+		return s
+	}
 	b.WriteString(s[last:])
 	return b.String()
 }
 
-// hasTokenValue reports whether s, read literally, has a token key with a value other than "…".
+// hasTokenValue reports whether s, read literally, has a key ending in "token" followed by '='
+// and a value other than "…".
 func hasTokenValue(s string) bool {
 	for i := 0; i < len(s); i++ {
 		if s[i] != '=' {
@@ -69,17 +84,26 @@ func hasTokenValue(s string) bool {
 		for start > 0 && keyByte(s[start-1]) {
 			start--
 		}
-		value := s[i+1 : valueEnd(s, i+1)]
-		if value != "" && value != "…" && strings.HasSuffix(strings.ToLower(s[start:i]), "token") {
+		if !strings.HasSuffix(strings.ToLower(s[start:i]), "token") {
+			continue
+		}
+		end := valueEnd(s, i+1)
+		if value := s[i+1 : end]; value != "" && value != "…" {
 			return true
 		}
+		i = end - 1
 	}
 	return false
 }
 
-// tokenKey reports whether key, in any of its decodings, ends with "token" in any case.
+// tokenKey reports whether key, in any of its decodings, ends with "token" in any case. A
+// key whose decoding does not settle counts as one: its value is cut out.
 func tokenKey(key string) bool {
-	for _, k := range decodings(key) {
+	layers, settled := decodings(key)
+	if !settled {
+		return true
+	}
+	for _, k := range layers {
 		if strings.HasSuffix(strings.ToLower(k), "token") {
 			return true
 		}
@@ -105,19 +129,22 @@ func valueEnd(s string, i int) int {
 	return i
 }
 
-// decodings returns s and each successive decoding of it until it stops changing, at most
-// maxDecodings+1 layers; one more than that means it was still changing.
-func decodings(s string) []string {
+// decodings returns s and each successive decoding of it, and whether the last one is stable
+// (decoding it changes nothing) within maxDecodings decodings.
+func decodings(s string) ([]string, bool) {
 	out := []string{s}
 	for range maxDecodings + 1 {
 		next := percentDecode(html.UnescapeString(s))
 		if next == s {
-			return out
+			return out, true
+		}
+		if len(out) > maxDecodings {
+			return out, false
 		}
 		out = append(out, next)
 		s = next
 	}
-	return out
+	return out, false
 }
 
 // percentDecode undoes every valid %XX escape and leaves anything else as is ("100%").

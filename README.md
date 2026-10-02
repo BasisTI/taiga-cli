@@ -71,7 +71,7 @@ taiga story comments 246 --output text
 
 ## Projects, members, milestones and epics
 
-Read-only commands. Every string they print, nested ones and tags included, has the value of any token parameter hidden (`token=`, `access_token=`, and the same key spelled with percent escapes or HTML entities, such as `%74oken=`, and inside the value of another parameter, as in `link=https://h/a?token=…`): signed media links (project logos, user photos) open files without authentication. A text in which a token only shows up once decoded, where its value cannot be cut out, is replaced whole by `[redacted: the text carries a credential]`.
+Read-only commands. Every string they print, nested ones and tags included, has the value of any token parameter hidden (`token=`, `access_token=`, and the same key spelled with percent escapes or HTML entities, such as `%74oken=`, and inside the value of another parameter, as in `link=https://h/a?token=…`): signed media links (project logos, user photos) open files without authentication. A text in which a token parameter only shows up once decoded, where its value cannot be cut out, or whose percent escapes and HTML entities are still changing after 16 decodings, is replaced whole by `[redacted: the text carries a credential]`. Text that merely mentions the word (`tokenizer=python`, `?q=token`) is kept.
 
 | Command | What it does |
 |---|---|
