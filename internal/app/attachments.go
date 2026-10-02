@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash"
@@ -172,12 +173,7 @@ func (s *Service) Upload(ctx context.Context, kind string, owner Object, path, d
 	}
 	fields := map[string]string{"project": s.projectID(), "object_id": fmt.Sprint(owner["id"]), "description": description}
 	if dry {
-		// The plan is printed: a signed URL pasted in the description must not reach the output.
-		shown := map[string]string{}
-		for k, v := range fields {
-			shown[k] = taiga.RedactSecrets(v)
-		}
-		return UploadPlan{true, "POST", endpoint, shown, file}, nil
+		return redactPlan(UploadPlan{true, "POST", endpoint, fields, file})
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -215,6 +211,42 @@ func (s *Service) Upload(ctx context.Context, kind string, owner Object, path, d
 
 // checkTimeout bounds the list read that confirms an upload whose answer was lost.
 const checkTimeout = 30 * time.Second
+
+// redactPlan is the printed form of a plan: every string in it, at any depth, goes through
+// taiga.RedactSecrets, so a signed URL in a description or a file name never reaches the
+// output. Only the printout is redacted; the request keeps the values as given. It is a plain
+// map, not an Object, so text output prints every key like other plans.
+func redactPlan(plan any) (map[string]any, error) {
+	b, err := json.Marshal(plan)
+	if err != nil {
+		return nil, err
+	}
+	o, err := Decode(b)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any(redactValue(o).(Object)), nil
+}
+
+func redactValue(v any) any {
+	switch x := v.(type) {
+	case string:
+		return taiga.RedactSecrets(x)
+	case Object:
+		for k, e := range x {
+			x[k] = redactValue(e)
+		}
+	case map[string]any:
+		for k, e := range x {
+			x[k] = redactValue(e)
+		}
+	case []any:
+		for i, e := range x {
+			x[i] = redactValue(e)
+		}
+	}
+	return v
+}
 
 func created(o Object, isNew bool) Object {
 	out := attachmentView(o)
@@ -351,13 +383,13 @@ func (s *Service) DownloadAttachment(ctx context.Context, kind string, owner Obj
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(target), ".taiga-download-*")
 	if err != nil {
-		return nil, err
+		return nil, taiga.ToOutput(&taiga.LocalWriteError{Err: err})
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	h := sha1.New()
 	n, err := s.API.Download(ctx, rawURL, io.MultiWriter(tmp, h))
 	if cerr := tmp.Close(); err == nil && cerr != nil {
-		return nil, cerr
+		return nil, taiga.ToOutput(&taiga.LocalWriteError{Err: cerr})
 	}
 	if err != nil {
 		return nil, taiga.ToOutput(err)
@@ -368,7 +400,7 @@ func (s *Service) DownloadAttachment(ctx context.Context, kind string, owner Obj
 	// The temporary file is 0600 while unchecked; the saved one gets the user's umask, like any
 	// file the user creates.
 	if err := os.Chmod(tmp.Name(), 0o666&^currentUmask()); err != nil {
-		return nil, err
+		return nil, taiga.ToOutput(&taiga.LocalWriteError{Err: err})
 	}
 	if overwrite {
 		err = os.Rename(tmp.Name(), target)
@@ -380,7 +412,7 @@ func (s *Service) DownloadAttachment(ctx context.Context, kind string, owner Obj
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, taiga.ToOutput(&taiga.LocalWriteError{Err: err})
 	}
 	result["path"] = target
 	return result, nil

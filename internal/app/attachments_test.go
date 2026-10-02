@@ -563,3 +563,45 @@ func TestUploadPostconditionChecksName(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// Every string of the dry-run plan is redacted, the file name included; a real upload still
+// sends the name as it is (round 2 of the PR #12 review).
+func TestUploadDryRunRedactsEveryField(t *testing.T) {
+	f, s := newAttachAPI(t)
+	var sent string
+	f.upload = func(a *attachAPI, path string, fields map[string]string, name string, content []byte) (*taiga.Response, error) {
+		sent = name
+		return accept(a, path, fields, name, content)
+	}
+	file := writeFile(t, "report.txt?token=SIGNED_SENTINEL", "content")
+	plan, err := s.Upload(context.Background(), "story", story(t, s), file, "see http://h/m?token=OTHER_SENTINEL", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(plan)
+	if strings.Contains(string(b), "SENTINEL") || !strings.Contains(string(b), `"name":"report.txt?…"`) || !strings.Contains(string(b), `"sha1":"`+sum("content")+`"`) {
+		t.Fatalf("%s", b)
+	}
+	if _, err := s.Upload(context.Background(), "story", story(t, s), file, "", false); err != nil || sent != "report.txt?token=SIGNED_SENTINEL" {
+		t.Fatalf("sent %q: %v", sent, err)
+	}
+}
+
+// Failures of the local file system around the download are local_write_failed, not unexpected.
+func TestDownloadLocalFailuresAreLocalWriteFailed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes in read-only directories")
+	}
+	f, s := newAttachAPI(t)
+	a := f.store("userstories/attachments", 6808, "r.txt", "content")
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(dir, 0o700) }()
+	_, err := s.DownloadAttachment(context.Background(), "story", story(t, s), ID(a["id"]), dir, false, nil)
+	var e *output.Error
+	if !errors.As(err, &e) || e.Code != "local_write_failed" || e.Source != "file" || e.Exit != output.ExitUnexpected {
+		t.Fatalf("%+v", err)
+	}
+}

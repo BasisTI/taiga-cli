@@ -317,3 +317,11 @@ func TestRedactSecrets(t *testing.T) {
 		}
 	}
 }
+
+// With --to -, part of the file may already be out: the recovery must not say nothing was.
+func TestLocalWriteFailedRecoveryMentionsStdout(t *testing.T) {
+	e := ToOutput(&LocalWriteError{Err: syscall.EPIPE})
+	if strings.Contains(e.Recovery, "nothing was saved") || !strings.Contains(e.Recovery, "--to -") {
+		t.Fatalf("%q", e.Recovery)
+	}
+}

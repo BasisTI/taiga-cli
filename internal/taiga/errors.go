@@ -127,7 +127,7 @@ func ToOutput(err error) *output.Error {
 	var lw *LocalWriteError
 	if errors.As(err, &lw) {
 		return &output.Error{Code: "local_write_failed", Source: "file", Cause: lw.Error(),
-			Recovery: "check free space and permissions at the destination (or the reader of stdout); nothing was saved", Exit: output.ExitUnexpected}
+			Recovery: "check free space and permissions at the destination; no file was saved (with --to -, part of the file may already be out: discard it)", Exit: output.ExitUnexpected}
 	}
 	var uu *UntrustedURLError
 	if errors.As(err, &uu) {
