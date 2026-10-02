@@ -79,3 +79,17 @@ func TestWriteErrorTextWithoutCause(t *testing.T) {
 		t.Fatalf("first line = %q", first)
 	}
 }
+
+// Causes often carry the server's text: controls and bidi must not reach the terminal raw.
+func TestWriteErrorTextEscapesControls(t *testing.T) {
+	var b bytes.Buffer
+	evil := "bad\ncheck project: ok\x1b[31m\u202eFAKE"
+	_ = WriteError(&b, Text, &Error{Code: "forbidden", Cause: evil, Stage: "GET x\x1b[0m", Recovery: "fix\u2028it", Exit: ExitForbidden})
+	s := b.String()
+	if strings.ContainsAny(s, "\x1b\u202e\u2028") || strings.Contains(s, "\ncheck project") || strings.Count(s, "\n") != 3 {
+		t.Fatalf("text = %q", s)
+	}
+	if !strings.Contains(s, `"bad\ncheck project: ok\x1b[31m\u202eFAKE"`) {
+		t.Fatalf("cause not quoted: %q", s)
+	}
+}

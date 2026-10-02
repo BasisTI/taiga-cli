@@ -66,8 +66,7 @@ func (a *App) root() *cobra.Command {
 		Short: "Print the taiga version",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintf(a.Out, "taiga %s\n", currentVersion())
-			return err
+			return a.printLine("taiga " + currentVersion())
 		},
 	})
 	root.AddCommand(a.apiCmd())
@@ -78,6 +77,9 @@ func (a *App) root() *cobra.Command {
 	root.AddCommand(a.statusCmd())
 	root.AddCommand(a.swimlaneCmd())
 	root.AddCommand(a.attachmentCmd())
+	root.AddCommand(a.userCmd())
+	root.AddCommand(a.milestoneCmd())
+	root.AddCommand(a.epicCmd())
 	return root
 }
 
@@ -100,9 +102,9 @@ func (a *App) Run(args []string) int {
 	root := a.root()
 	root.SetArgs(args)
 	root.SetIn(a.In)
-	root.SetOut(a.Out)
-	root.SetErr(a.Err)
+	flush := a.wireOutput(root)
 	err := root.Execute()
+	flush()
 	if err == nil {
 		return output.ExitOK
 	}
@@ -125,6 +127,6 @@ func (a *App) finish(err error) int {
 	if e.Exit == output.ExitOK {
 		e.Exit = output.ExitUnexpected
 	}
-	_ = output.WriteError(a.Err, mode, e)
+	_ = a.writeError(mode, e)
 	return e.Exit
 }

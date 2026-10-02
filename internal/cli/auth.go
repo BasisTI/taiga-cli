@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BasisTI/taiga-cli/internal/app"
 	"github.com/BasisTI/taiga-cli/internal/auth"
 	"github.com/BasisTI/taiga-cli/internal/config"
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -65,9 +66,9 @@ func (a *App) authLoginCmd() *cobra.Command {
 				}
 				pw = bytes.TrimRight(b, "\r\n")
 			case a.stdinIsTTY():
-				_, _ = io.WriteString(a.Err, "Password: ")
+				a.prompt("Password: ")
 				b, err := term.ReadPassword(int(a.In.(*os.File).Fd()))
-				_, _ = io.WriteString(a.Err, "\n")
+				a.prompt("\n")
 				if err != nil {
 					return err
 				}
@@ -219,11 +220,19 @@ func (a *App) printStatus(ctx context.Context, diagnose bool) error {
 		if host.SecretSource == "keyring" || host.SecretSource == "" {
 			probe = auth.Keyring{Ref: ref}.Available
 		}
-		v.Checks = auth.Diagnose(ctx, auth.DiagnoseInput{Env: a.Env, Store: r.Store, Ref: ref, Secret: r.Secret, KeyringProbe: probe, StdinTTY: a.stdinIsTTY(), Now: time.Now})
+		project := &auth.ProjectInput{Selected: rc.Ctx.Project.Value, Source: rc.Ctx.Project.Source, AuthFailed: identityErr != nil,
+			Load: func(ctx context.Context) (map[string]any, error) {
+				s, err := app.New(ctx, c, rc.Ctx.Project.Value)
+				if err != nil {
+					return nil, err
+				}
+				return s.ProjectView(), nil // without credentials and signed URLs, like project get
+			}}
+		v.Checks = auth.Diagnose(ctx, auth.DiagnoseInput{Env: a.Env, Store: r.Store, Ref: ref, Secret: r.Secret, KeyringProbe: probe, StdinTTY: a.stdinIsTTY(), Now: time.Now, Project: project})
 	}
 	mode, _ := output.DetectMode(a.output, a.OutTTY)
 	if mode == output.JSON {
-		if err := output.WriteJSON(a.Out, v); err != nil {
+		if err := a.writeJSON(v); err != nil {
 			return err
 		}
 	} else {
@@ -235,7 +244,7 @@ func (a *App) printStatus(ctx context.Context, diagnose bool) error {
 		for _, ch := range v.Checks {
 			fields = append(fields, output.Field{Key: "check " + ch.Name, Value: ch.Status + " " + ch.Detail})
 		}
-		if err := output.WriteFields(a.Out, fields); err != nil {
+		if err := a.writeFields(fields); err != nil {
 			return err
 		}
 	}
@@ -276,8 +285,7 @@ func (a *App) authLogoutCmd() *cobra.Command {
 					return err
 				}
 			}
-			_, err = io.WriteString(a.Out, "logged out of "+r.URL+" ("+r.Username+")\n")
-			return err
+			return a.printLine("logged out of " + r.URL + " (" + r.Username + ")")
 		},
 	}
 }

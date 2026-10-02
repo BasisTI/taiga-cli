@@ -197,11 +197,13 @@ Flags comuns: `--project`, `--output`, `--dry-run` (em escritas).
 
 | Comando | Faz |
 |---|---|
-| `taiga project list\|get` | Projetos acessíveis e detalhe |
-| `taiga user list [--search]` | Usuários do projeto |
+| `taiga project list [--search]` | Projetos de que a conta é membro (`projects?member=<users/me>`); não exige projeto selecionado |
+| `taiga project get [SLUG\|ID]` | Detalhe; sem argumento, o projeto selecionado, com `source` (flag, env, `.taiga.toml`, config ou `argument`); `*_csv_uuid` e `transfer_token` nunca saem |
+| `taiga user list [--search]` | Membros do projeto (`memberships` ∩ `users?project=`), com `is_admin` e `role_name`; busca sem normalizar acento |
 | `taiga status list [--kind story\|task]` | Status do projeto |
 | `taiga swimlane list` | Swimlanes do projeto, na ordem do board, com `is_default`; só leitura (criar, renomear e reordenar ficam na interface web) |
-| `taiga milestone list` | Sprints |
+| `taiga milestone list [--search] [--closed[=false]]` | Sprints; `closed` enviado ao servidor e conferido localmente |
+| `taiga auth status --diagnose` (check `project`) | Projeto selecionado: membro, admin, permissões que faltam, módulos e swimlanes; só leitura (US #253) |
 
 **Stories:**
 
@@ -229,7 +231,8 @@ Flags comuns: `--project`, `--output`, `--dry-run` (em escritas).
 
 | Comando | Faz |
 |---|---|
-| `taiga epic list\|get\|link EPIC_REF STORY_REF` | Épicos e vínculo com stories |
+| `taiga epic list [--search] [--closed[=false]]` / `taiga epic get REF` | Épicos (com `url`) e detalhe com as stories vinculadas; recusados com `not_found` quando o módulo de épicos está desligado (a API continua servindo) |
+| `taiga epic link EPIC_REF STORY_REF` | Vínculo com stories (PR 253-2) |
 | `taiga task list [--story REF] \| get \| create --story REF ... \| update \| close` | Tasks com os mesmos padrões de responsáveis, status, tags, `version` e campos |
 
 **Projeto como código:**

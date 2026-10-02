@@ -1,0 +1,6 @@
+go test fuzz v1
+string("%A0%A0%A0%A0=")
+string("0")
+byte('~')
+byte('2')
+byte('m')

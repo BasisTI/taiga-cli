@@ -194,16 +194,12 @@ type LocalWriteError struct{ Err error }
 func (e *LocalWriteError) Error() string { return "writing the downloaded file: " + e.Err.Error() }
 func (e *LocalWriteError) Unwrap() error { return e.Err }
 
-var (
-	urlQuery   = regexp.MustCompile(`\?[^\s"'<>#]+`)
-	tokenParam = regexp.MustCompile(`(?i)(token=)[^&\s"'<>#]*`)
-)
+var urlQuery = regexp.MustCompile(`\?[^\s"'<>#]+`)
 
-// RedactSecrets hides the query of every URL in s, and any bare token= value: signed URLs
-// carry their credential there.
+// RedactSecrets hides the query of every URL in s, and any token value left outside a URL:
+// signed URLs carry their credential there.
 func RedactSecrets(s string) string {
-	s = urlQuery.ReplaceAllString(s, "?…")
-	return tokenParam.ReplaceAllString(s, "${1}…")
+	return RedactTokens(urlQuery.ReplaceAllString(s, "?…"))
 }
 
 // redactURLSecrets is RedactSecrets plus every value of u's query, raw or escaped, wherever it

@@ -62,6 +62,32 @@ taiga story comments 246 --output text
 - Swimlanes: `taiga swimlane list` mostra as swimlanes do projeto na ordem do board, com `is_default` na padrão. `--swimlane` (nome ou id) move a story; `--clear-swimlane` tira a story de qualquer swimlane; `story list --swimlane A` e `story list --no-swimlane` filtram por elas. Story criada sem `--swimlane` fica sem swimlane, mesmo com uma padrão no projeto. Criar, renomear e reordenar swimlanes continua na interface web: exige admin, a primeira swimlane do projeto puxa todas as stories e a ordem não tem `version`.
 - Vincular story a épico (`--epic`) ainda não é suportado: o Taiga faz o vínculo por um recurso à parte, sem `version`, e trocar o vínculo exige `DELETE`. Use a interface web por enquanto.
 
+## Projetos, membros, milestones e épicos
+
+Comandos só de leitura:
+
+```sh
+taiga project list --output text        # projetos de que a conta é membro; não precisa de projeto selecionado
+taiga project get --output text         # o projeto selecionado e de onde ele veio (source: flag, env, .taiga.toml, config, ou argument)
+taiga user list --search silva          # só membros do projeto, com is_admin e role_name
+taiga milestone list --closed=false
+taiga epic list --closed=false
+taiga epic get 12 --output text         # descrição e stories vinculadas, na ordem do vínculo
+```
+
+- `--search` procura o texto nos nomes sem diferenciar maiúsculas, mas **sem** ignorar acento: `agil` não acha `Ágil`.
+- `epic get` lista em `user_stories` as stories vinculadas, inclusive de outro projeto (com `project_slug`); uma story que a conta não pode ler aparece só com o `id`.
+- Com o módulo de épicos desligado no projeto, `epic list` e `epic get` respondem `not_found` ("the epics module is disabled in this project"), embora a API do Taiga continue servindo os épicos.
+- Links assinados de mídia (logo do projeto, foto de usuário) saem com o valor do token escondido, em qualquer texto, tags inclusive, e também quando a chave vem codificada (`%74oken=`, `t&#111;ken=`, `t&amp;#111;ken=`, `access_token=`) ou dentro do valor de outro parâmetro (`link=https://h/a?token=…`). Se o parâmetro de token só aparece depois de decodificar o texto e não dá para recortar o valor, ou se a decodificação de escapes `%` e entidades HTML ainda muda depois de 16 camadas, o texto inteiro vira `[redacted: the text carries a credential]`; texto que só menciona a palavra (`tokenizer=python`, `?q=token`) fica como está; e as credenciais do projeto (`*_csv_uuid`, que abre a exportação CSV sem autenticação, e `transfer_token`) nunca saem.
+
+## Diagnóstico do projeto
+
+`taiga auth status --diagnose` termina com o check `project`: lê o projeto selecionado (só leitura) e mostra `id`, `slug`, a origem da seleção, se a conta é membro e admin, as permissões que faltam entre as que os comandos usam (`view_us`, `modify_us`, `add_us`, `comment_us`, `view_tasks`, `add_task`, `modify_task`, `modify_epic`, `admin_project_values`), os módulos de épicos, kanban e backlog e o número de swimlanes. Fica `skipped` sem projeto selecionado ou quando a identidade (`users/me`) falhou, e `failed` quando o projeto não pode ser lido: não existe, a conta não o vê, ou outro erro (rede, servidor) interrompeu a leitura. Permissão faltando não reprova o check; só avisa: sem `modify_epic`, vincular épico vai dar `forbidden`; sem `admin_project_values`, `project apply` também.
+
+## Fotos e outros links assinados
+
+Toda saída dos comandos curados (todos menos `taiga api`, que mostra a resposta do Taiga como veio) esconde o valor dos parâmetros de token em tudo o que imprime, na saída e nos erros e avisos (stderr), inclusive nos planos de `--dry-run`, mantendo as chaves e o resto da URL. Só a impressão muda: a escrita de verdade envia os valores como vieram e como estão guardados. As fotos de usuário (`photo` e `big_photo` em `owner_extra_info`, `assigned_to_extra_info` e no autor dos comentários), o logo do projeto e os links de anexo são URLs assinadas de mídia que abrem o arquivo sem autenticação enquanto o token vale. Em `story get`, a foto sai como `"photo": "https://…/media/user/…?token=…"`.
+
 ## Anexos
 
 ```sh

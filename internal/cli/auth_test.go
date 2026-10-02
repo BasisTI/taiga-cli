@@ -132,3 +132,68 @@ func TestLogoutReportsKeyringDeleteFailure(t *testing.T) {
 		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 	}
 }
+
+func diagnoseChecks(t *testing.T, env map[string]string, args ...string) (map[string]map[string]any, int) {
+	t.Helper()
+	out, _, code := runIn(t, env, "", append([]string{"auth", "status", "--diagnose"}, args...)...)
+	var st struct{ Checks []map[string]any }
+	if err := json.Unmarshal([]byte(out), &st); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	byName := map[string]map[string]any{}
+	for _, c := range st.Checks {
+		byName[c["name"].(string)] = c
+	}
+	return byName, code
+}
+
+func TestStatusDiagnoseChecksProject(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(t.TempDir(), "no-bus"))
+	_, url, calls := newCatalogFake(t)
+	checks, code := diagnoseChecks(t, catalogEnv(url))
+	p := checks["project"]
+	if code != 0 || p["status"] != "ok" || !strings.Contains(p["detail"].(string), "source=env:TAIGA_PROJECT") || !strings.Contains(p["detail"].(string), "missing permissions: view_us") {
+		t.Fatalf("%d %v", code, p)
+	}
+	if data, _ := p["data"].(map[string]any); data["slug"] != "infra-2025" || data["is_member"] != true {
+		t.Fatalf("%v", p)
+	}
+	checks, _ = diagnoseChecks(t, catalogEnv(url), "--project", "99")
+	if p := checks["project"]; p["status"] != "failed" || !strings.Contains(p["detail"].(string), "not_found") {
+		t.Fatalf("%v", p)
+	}
+	checks, _ = diagnoseChecks(t, map[string]string{"TAIGA_URL": url, "TAIGA_TOKEN": "tok"})
+	if p := checks["project"]; p["status"] != "skipped" {
+		t.Fatalf("%v", p)
+	}
+	if len(writes(calls)) != 0 {
+		t.Fatalf("diagnose wrote: %+v", writes(calls))
+	}
+	// Without --diagnose the project is not read.
+	n := len(*calls)
+	if _, _, code := runIn(t, catalogEnv(url), "", "auth", "status"); code != 0 || len(*calls) != n+1 {
+		t.Fatalf("status read more than users/me: %d %+v", code, (*calls)[n:])
+	}
+}
+
+func TestStatusDiagnoseSkipsProjectWhenAuthFails(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(t.TempDir(), "no-bus"))
+	env := map[string]string{"TAIGA_URL": "http://127.0.0.1:1", "TAIGA_USERNAME": "svc", "TAIGA_PROJECT": "infra"}
+	checks, code := diagnoseChecks(t, env)
+	if code == 0 || checks["project"]["status"] != "skipped" || checks["project"]["detail"] != "identity check (users/me) failed" {
+		t.Fatalf("%d %v", code, checks["project"])
+	}
+}
+
+func TestStatusDiagnoseTextEscapesProject(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(t.TempDir(), "no-bus"))
+	f, url, _ := newCatalogFake(t)
+	f.project["slug"] = "infra\x1b[31m\u202e\ncheck x: ok"
+	out, stderr, code := runIn(t, catalogEnv(url), "", "auth", "status", "--diagnose", "--output", "text")
+	if code != 0 {
+		t.Fatalf("%d %s", code, stderr)
+	}
+	if strings.ContainsAny(out, "\x1b\u202e") || strings.Contains(out, "\ncheck x") || !strings.Contains(out, `\x1b[31m\u202e\ncheck x: ok`) {
+		t.Fatalf("%q", out)
+	}
+}

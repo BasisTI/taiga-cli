@@ -1,0 +1,6 @@
+go test fuzz v1
+string("&ampamp ")
+string("0")
+byte('7')
+byte('F')
+byte('\x03')

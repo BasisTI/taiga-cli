@@ -69,6 +69,31 @@ taiga story comment 246 --body-file note.md
 taiga story comments 246 --output text
 ```
 
+## Projects, members, milestones and epics
+
+Read-only commands. Every string they print, nested ones and tags included, has the value of any token parameter hidden (`token=`, `access_token=`, and the same key spelled with percent escapes or HTML entities, such as `%74oken=`, and inside the value of another parameter, as in `link=https://h/a?token=…`): signed media links (project logos, user photos) open files without authentication. A text in which a token parameter only shows up once decoded, where its value cannot be cut out, or whose percent escapes and HTML entities are still changing after 16 decodings, is replaced whole by `[redacted: the text carries a credential]`. Text that merely mentions the word (`tokenizer=python`, `?q=token`) is kept.
+
+| Command | What it does |
+|---|---|
+| `taiga project list [--search TEXT]` | The projects you are a member of (checked locally too); needs no selected project |
+| `taiga project get [SLUG\|ID]` | A project; without an argument, the selected one, with `source` saying where it was selected (flag, env, `.taiga.toml`, config; `argument` when given). Credentials of the project (`*_csv_uuid`, `transfer_token`) are never printed |
+| `taiga user list [--search TEXT]` | The project members (never other users), with `is_admin` and `role_name` from the membership |
+| `taiga milestone list [--search TEXT] [--closed[=false]]` | The project's milestones (sprints); JSON output carries each sprint's stories |
+| `taiga epic list [--search TEXT] [--closed[=false]]` | The project's epics, with their web `url` |
+| `taiga epic get REF` | One epic, with its description and `user_stories`: the linked stories in link order (`id`, `ref`, `subject`, `project`, plus `project_slug` for a story of another project; a story you cannot read keeps only its `id`) |
+
+- `--search` looks for the text in names (project name or slug; username or full name; milestone name; epic subject), ignoring case but not accents: `agil` does not find `Ágil`. It is checked locally; Taiga's own `q` is a word search that would hide partial matches.
+- `--closed` is sent to Taiga, which honours it, and checked again locally.
+- Taiga keeps serving the epics of a project whose epics module is off; `epic list` and `epic get` refuse it with `not_found` ("the epics module is disabled in this project"). `taiga api` still reads them.
+
+```sh
+taiga project list --output text
+taiga project get --output text
+taiga user list --search silva
+taiga milestone list --closed=false
+taiga epic get 12 --output text
+```
+
 ## Attachments
 
 | Command | What it does |
@@ -154,7 +179,9 @@ taiga project apply -f taiga-project.toml
 
 ## Output and exit codes
 
-Without a terminal on stdout, `taiga` prints JSON; on a terminal it prints text. Force either with `--output json` or `--output text`. Errors go to stderr as `{"error":{"code","source","stage","cause","recovery"}}`; `code` is stable and `cause` never contains a secret.
+Without a terminal on stdout, `taiga` prints JSON; on a terminal it prints text. Force either with `--output json` or `--output text`. Errors go to stderr as `{"error":{"code","source","stage","cause","recovery"}}`; `code` is stable and `cause` never contains a secret. In text mode, any value with control or bidi characters (often the server's own text) is printed Go-quoted, on one line.
+
+Every curated command (all but `taiga api`, which prints Taiga's answer as is) hides the value of token parameters in everything it prints, on stdout and on stderr (errors and warnings), `--dry-run` plans included, keeping the keys and the rest of the URL (only the printout changes: a real write sends the values as given and as stored): user photos (`photo`, `big_photo` in `owner_extra_info`, `assigned_to_extra_info`, the comment author), project logos and attachment links are signed media URLs that open the file without authentication while the token lasts. `story get` shows `"photo": "https://…/media/user/…/photo.png?token=…"`.
 
 | Exit | Meaning |
 |---|---|
@@ -197,6 +224,8 @@ The token for each call is resolved in this order:
 ```sh
 taiga auth status --diagnose --output text
 ```
+
+The last check, `project`, reads the selected project (it only reads) and reports its `id`, `slug` and where it was selected; whether you are a member and an admin; the permissions the curated commands need that you lack (`view_us`, `modify_us`, `add_us`, `comment_us`, `view_tasks`, `add_task`, `modify_task`, `modify_epic`, `admin_project_values`); the epics, kanban and backlog modules; and the number of swimlanes. JSON output also carries them under `data`. It is `skipped` without a selected project or when the identity check (`users/me`) failed, and `failed` when the project cannot be read: it does not exist, the account cannot see it, or another error (network, server) stopped the read. Missing permissions do not fail it: they limit some commands (`project apply` needs `admin_project_values`).
 
 ## Coding agents and sandboxes
 

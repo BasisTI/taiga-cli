@@ -75,7 +75,7 @@ func (a *App) apiCmd() *cobra.Command {
 					}
 				}
 				target := c.BaseURL() + "/api/v1/" + path
-				return output.WriteJSON(a.Out, map[string]any{"dry_run": true, "method": method, "url": target, "query": q, "body": body})
+				return output.WriteJSON(a.rawOut(), map[string]any{"dry_run": true, "method": method, "url": target, "query": q, "body": body})
 			}
 			var resp *taiga.Response
 			switch {
@@ -84,7 +84,7 @@ func (a *App) apiCmd() *cobra.Command {
 				if err != nil {
 					return taiga.ToOutput(err)
 				}
-				return output.WriteJSON(a.Out, items)
+				return output.WriteJSON(a.rawOut(), items)
 			case autoVersion:
 				resp, err = c.WriteVersioned(ctx, method, path, body, forceVersion)
 			default:
@@ -109,7 +109,7 @@ func (a *App) apiCmd() *cobra.Command {
 			if !bytes.HasSuffix(buf.Bytes(), []byte("\n")) {
 				buf.WriteByte('\n')
 			}
-			_, err = a.Out.Write(buf.Bytes())
+			_, err = a.rawOut().Write(buf.Bytes())
 			return err
 		},
 	}

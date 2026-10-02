@@ -1,0 +1,6 @@
+go test fuzz v1
+string("aaaaa=\x9b")
+string("0")
+byte('s')
+byte('Õ')
+byte('(')
