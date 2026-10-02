@@ -32,4 +32,4 @@ jobs:
       - run: scripts/taiga-seed
       - run: go test -tags integration -p 1 ./...
       - if: failure()
-        run: docker compose -f compose.test.yml logs taiga-back | tail -200
+        run: docker compose -f compose.test.yml logs taiga-back taiga-gateway taiga-protected | tail -300

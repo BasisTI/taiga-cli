@@ -62,6 +62,28 @@ taiga story comments 246 --output text
 - Swimlanes: `taiga swimlane list` mostra as swimlanes do projeto na ordem do board, com `is_default` na padrão. `--swimlane` (nome ou id) move a story; `--clear-swimlane` tira a story de qualquer swimlane; `story list --swimlane A` e `story list --no-swimlane` filtram por elas. Story criada sem `--swimlane` fica sem swimlane, mesmo com uma padrão no projeto. Criar, renomear e reordenar swimlanes continua na interface web: exige admin, a primeira swimlane do projeto puxa todas as stories e a ordem não tem `version`.
 - Vincular story a épico (`--epic`) ainda não é suportado: o Taiga faz o vínculo por um recurso à parte, sem `version`, e trocar o vínculo exige `DELETE`. Use a interface web por enquanto.
 
+## Anexos
+
+```sh
+taiga attachment upload 246 relatorio.pdf --description "execução em staging"
+taiga attachment list 246 --output text
+taiga attachment download 246 3121 --to ~/Downloads/
+taiga attachment upload 18 log.txt --task
+taiga attachment download 18 3122 --task --to - | less
+```
+
+- Valem para story e, com `--task`, para task. Não há edição nem exclusão de anexo pela CLI.
+- Idempotência pelo conteúdo: se a story (ou task) já tem um anexo com o mesmo nome e o mesmo `sha1`, `upload` não envia nada e devolve esse anexo com `"created": false`. Rodar o mesmo comando duas vezes não duplica o anexo; o mesmo conteúdo com outro nome é um anexo novo.
+- O upload é enviado uma vez só, nunca repetido. A resposta é conferida (`sha1`, tamanho, objeto); se não bate, sai `attachment_postcondition_failed` (exit 4) e o anexo **foi gravado**. Se a resposta se perde (rede ou 5xx), a CLI procura na lista um anexo novo com o mesmo nome e `sha1`: achou, sucesso; não achou, `attachment_unconfirmed` (exit 1). Confira com `taiga attachment list` antes de enviar de novo.
+- Nomes que o Taiga gravaria diferente (caracteres de controle, barra invertida, entidade HTML como `&amp;`, com ou sem `;`, ou qualquer `&#`) são recusados: renomeie o arquivo. A idempotência compara o nome gravado.
+- A CLI não limita o tamanho. O proxy da Basis aceita até **50 MB** (`client_max_body_size 50M`); acima disso sai `payload_too_large` (exit 2). Arquivo vazio é recusado, porque o Taiga recusa.
+- Por que o `url` não aparece: o Taiga devolve no anexo um `url` com token assinado que abre o arquivo **sem autenticação** por alguns minutos. A CLI nunca o imprime, nem no JSON. O caminho para o arquivo é `attachment download`, que lê um `url` novo, só baixa da mesma origem da URL do Taiga, sem `Authorization` e sem seguir redirect.
+- `download` grava em `--to` (arquivo ou diretório existente), no stdout com `--to -`, ou no diretório atual. O nome vindo do servidor é tratado como não confiável: só o último componente, com controles, caracteres bidi e ponto inicial trocados por `_` (um anexo nunca vira arquivo oculto como `.bashrc`). Arquivo existente só é substituído com `--overwrite`. Os bytes vão para um temporário (0600) no mesmo diretório, que ao ser salvo recebe o umask do usuário, e só viram o destino depois de conferidos tamanho e `sha1`; se não batem, sai `attachment_download_mismatch` (exit 7) e nada é salvo.
+- `--dry-run` mostra os campos e nome, tamanho e `sha1` do arquivo, nunca o conteúdo; em todo valor do plano (descrição, nome do arquivo) a query de URLs e os valores de `token=` aparecem ocultos. O envio real manda os valores como foram dados.
+- `--to -`: os bytes vão direto para o stdout, e a conferência roda no fim. Se falhar, o erro sai no stderr com exit 7, e quem leu deve descartar o que recebeu. Nesse modo nenhum JSON de resultado é impresso.
+- `--timeout` (padrão `10m`) limita a transferência inteira; as chamadas comuns da API continuam com 30 s. Interromper (Ctrl-C, SIGTERM) cancela de forma limpa: o download apaga o temporário, e o upload ainda confere a lista (com prazo próprio, mesmo depois do `--timeout`).
+- Repetir o upload com outra `--description` devolve o anexo existente sem alterá-lo.
+
 ## Campos customizados
 
 ```sh

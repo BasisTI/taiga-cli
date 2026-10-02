@@ -69,6 +69,32 @@ taiga story comment 246 --body-file note.md
 taiga story comments 246 --output text
 ```
 
+## Attachments
+
+| Command | What it does |
+|---|---|
+| `taiga attachment list REF [--task]` | The attachments of a story (or of a task): `id`, `name`, `size`, `sha1`, `description`, `created_date`, `owner`, `is_deprecated` |
+| `taiga attachment upload REF FILE [--task] [--description TEXT] [--dry-run] [--timeout 10m]` | Attach a local file |
+| `taiga attachment download REF ATTACHMENT_ID [--task] [--to PATH\|-] [--overwrite] [--timeout 10m]` | Save an attachment, checked against its size and sha1 |
+
+- `upload` is idempotent by content: if the story or task already has an attachment with the same name and sha1, nothing is sent and that attachment comes back with `"created": false`. The same content under another name is a new attachment.
+- The upload is sent once and never repeated. Its answer is checked (sha1, size, object); a mismatch is `attachment_postcondition_failed` (exit 4): the file **was stored**. If the answer is lost, the CLI looks for a new attachment with that name and sha1: found, success; otherwise `attachment_unconfirmed` (exit 1). Check `attachment list` before uploading again.
+- File names Taiga would store differently (control characters, a backslash, an HTML entity such as `&amp;`, with or without `;`, or any `&#`) are refused: rename the file. The idempotence compares the stored name.
+- The CLI has no size limit. The proxy in front of Taiga has one (50 MB at Basis): above it the upload fails with `payload_too_large` (exit 2). Empty files are refused, as Taiga refuses them.
+- `--dry-run` prints the form fields and the file's name, size and sha1, never its content; every value of the plan (the description, the file name) is printed with URL queries and `token=` values hidden. The real upload sends them as given.
+- Taiga's attachment `url` carries a signed token that opens the file without authentication for a few minutes, so it is never printed. `download` reads a fresh one and fetches it only from the same origin as the Taiga URL, without the `Authorization` header and without following redirects.
+- `download` saves to `--to` (a file or an existing directory), to stdout with `--to -`, or to the working directory. The server's file name is treated as untrusted: only its last element is used, with control and bidi characters and a leading dot replaced by `_` (an attachment never becomes a hidden file such as `.bashrc`). An existing file is replaced only with `--overwrite`. The bytes go to a temporary file (0600) in the same directory, which gets the user's umask when saved, and become the destination only after their size and sha1 match (`attachment_download_mismatch`, exit 7, otherwise). With `--to -`, a mismatch is reported at the end and what was written must be discarded.
+- `--timeout` (default `10m`) bounds the whole transfer. An interrupt (Ctrl-C, SIGTERM) cancels it cleanly: a download removes its temporary file, an upload still checks the list.
+- A repeated upload with another `--description` returns the existing attachment unchanged.
+- Editing and deleting attachments stay in the web UI.
+
+```sh
+taiga attachment upload 246 report.pdf --description "staging run"
+taiga attachment list 246 --output text
+taiga attachment download 246 3121 --to ~/Downloads/
+taiga attachment download 18 3122 --task --to - | less
+```
+
 ## Custom fields
 
 | Command | What it does |
@@ -214,4 +240,4 @@ go test ./...
 docker compose -f compose.test.yml up -d && scripts/taiga-seed && go test -tags integration -p 1 ./...
 ```
 
-Integration tests only run against the local Taiga from `compose.test.yml`. Design notes and plans are in [docs/superpowers/specs/](docs/superpowers/specs/) and [docs/superpowers/plans/](docs/superpowers/plans/); Taiga API behaviour observed so far is in [docs/api-notes.md](docs/api-notes.md).
+Integration tests only run against the local Taiga from `compose.test.yml`. It is served on `127.0.0.1:8000` by an nginx gateway, as in a production deployment: `/api/` goes to `taiga-back`, attachment URLs (`/media/`) are checked by `taiga-protected`, and uploads above 50 MB are refused with 413, the limit of the Basis proxy. Changing the compose file needs `docker compose -f compose.test.yml down -v` before `up -d`. Design notes and plans are in [docs/superpowers/specs/](docs/superpowers/specs/) and [docs/superpowers/plans/](docs/superpowers/plans/); Taiga API behaviour observed so far is in [docs/api-notes.md](docs/api-notes.md).

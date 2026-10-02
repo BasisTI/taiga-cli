@@ -42,8 +42,9 @@ services:
   taiga-back:
     image: taigaio/taiga-back:6.7.3
     environment: *back-env
-    ports:
-      - "127.0.0.1:8000:8000"
+    # No published port: the API is reached through taiga-gateway on 127.0.0.1:8000.
+    volumes:
+      - taiga-media:/taiga-back/media
     depends_on:
       taiga-db:
         condition: service_healthy
@@ -51,7 +52,26 @@ services:
         condition: service_started
       taiga-async-rabbitmq:
         condition: service_started
-  # Services below are only started with `--profile full` (no gateway is provided).
+  # taiga-protected checks the token of an attachment URL and answers X-Accel-Redirect;
+  # taiga-gateway serves the file from the media volume, like the gateway of taiga-docker.
+  taiga-protected:
+    image: taigaio/taiga-protected:6.7.0
+    environment:
+      MAX_AGE: 360
+      SECRET_KEY: taiga-cli-test-secret-key-not-for-production
+  taiga-gateway:
+    image: nginx:1.27-alpine
+    ports:
+      - "127.0.0.1:8000:80"
+    volumes:
+      - taiga-media:/taiga/media:ro
+    configs:
+      - source: taiga-gateway
+        target: /etc/nginx/conf.d/default.conf
+    depends_on:
+      - taiga-back
+      - taiga-protected
+  # Services below are only started with `--profile full`.
   taiga-events:
     image: taigaio/taiga-events:6.7.0
     profiles: ["full"]
@@ -61,12 +81,6 @@ services:
       TAIGA_SECRET_KEY: taiga-cli-test-secret-key-not-for-production
     depends_on:
       - taiga-events-rabbitmq
-  taiga-protected:
-    image: taigaio/taiga-protected:6.7.0
-    profiles: ["full"]
-    environment:
-      MAX_AGE: 360
-      SECRET_KEY: taiga-cli-test-secret-key-not-for-production
   taiga-front:
     image: taigaio/taiga-front:6.7.7
     profiles: ["full"]
@@ -75,3 +89,33 @@ services:
       TAIGA_WEBSOCKETS_URL: ws://localhost:8000
       TAIGA_SUBPATH: ""
       PUBLIC_REGISTER_ENABLED: "true"
+volumes:
+  taiga-media: {}
+configs:
+  taiga-gateway:
+    content: |
+      server {
+        listen 80;
+        # The upload limit of the Basis proxy: above it, nginx answers 413 (payload_too_large).
+        client_max_body_size 50M;
+        location /api/ {
+          proxy_pass http://taiga-back:8000;
+          proxy_set_header Host $$http_host;
+          proxy_set_header X-Forwarded-Proto $$scheme;
+          proxy_read_timeout 120s;
+        }
+        location /admin/ {
+          proxy_pass http://taiga-back:8000;
+          proxy_set_header Host $$http_host;
+        }
+        location /media/ {
+          proxy_pass http://taiga-protected:8003/;
+          proxy_set_header Host $$http_host;
+          proxy_redirect off;
+        }
+        location /_protected/ {
+          internal;
+          alias /taiga/media/;
+          add_header Content-Disposition "attachment";
+        }
+      }

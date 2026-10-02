@@ -223,7 +223,7 @@ Flags comuns: `--project`, `--output`, `--dry-run` (em escritas).
 |---|---|
 | `taiga field list\|create --kind story\|task --name N --type text\|date\|checkbox\|...` | Definições de campos customizados; criação idempotente pelo nome |
 | `taiga project plan\|apply -f taiga-project.toml` | Status e campos como código (US #249) |
-| `taiga attachment list\|upload\|download REF [--task]` | Anexos de story (e de task) |
+| `taiga attachment list REF [--task]`, `taiga attachment upload REF FILE [--task] [--description TEXT] [--dry-run]`, `taiga attachment download REF ATTACHMENT_ID [--task] [--to PATH\|-] [--overwrite]` | Anexos de story (e de task); upload idempotente por nome e `sha1`; o `url` assinado nunca sai; download conferido por tamanho e `sha1` |
 
 **Épicos e tasks:**
 

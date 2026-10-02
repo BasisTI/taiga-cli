@@ -15,7 +15,7 @@ Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 202
 | Application tokens para conta de serviço | não validado na fase 1: exige cadastrar uma Application pelo admin do Django; fica para quando houver demanda | — |
 | `userstories/by_ref?ref=&project=` | validado na fase 2; ver seção abaixo | `TestProbeStoryByRef` |
 | Swimlanes: catálogo, primeira swimlane, `swimlane` na story, filtro da listagem, permissão | validado na fase 3; ver "swimlanes" | `TestProbeSwimlaneContract` |
-| Upload de anexo | fase 3 | — |
+| Anexos: upload multipart, nomes, arquivo vazio, listagem, objeto de outro projeto, duplicata, permissão, caminho do download | validado na fase 3, com o download pelo gateway do `compose.test.yml`; ver "anexos" | `TestProbeAttachmentContract` |
 | Comentários (`PATCH {comment, version}`, `history/userstory`, integração GitLab) | validado na fase 2; ver "comentários" | `TestProbeCommentContract`, `TestProbeCommentHistoryPages`, `TestIntegrationStoryComments` |
 | Relação `assigned_to` × `assigned_users`, bloqueio | validado na fase 2; ver "responsáveis e bloqueio" | `TestProbeStoryAssignees`, `TestProbeStoryBlock` |
 | Campos customizados (definições e valores) de story e task | validado na fase 2; ver "campos customizados" | `TestProbeFieldDefinitions`, `TestProbeFieldValues`, `TestProbeTaskFieldValues`, `TestProbeFieldValuesUnset` |
@@ -508,3 +508,72 @@ o resultado continua certo. `--no-swimlane` é uma flag própria, sem valor mág
 `--clear-swimlane` em `story update` envia `{swimlane: null, version}` pelo caminho versionado normal. Criar, renomear,
 reordenar e apagar swimlanes ficam fora da CLI (decisão de 2026-10-01): exigem admin, a primeira move todas as stories
 sem passar pelo OCC, e a ordem não tem `version`.
+
+## Fase 3 — anexos (US #251)
+
+Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 2026-10-02, com `admin` em dois
+projetos descartáveis criados pelo teste (`cli-test-probe-attachments-<sufixo>` e
+`cli-test-probe-attachments-other-<sufixo>`, ambos privados), com `svc` como membro sem admin do primeiro, convidado por
+e-mail. O `POST` multipart é montado no próprio teste (`mime/multipart`), sem o código do cliente. Teste em
+`internal/taiga/attachments_probe_integration_test.go`: `go test -tags integration -run '^TestProbeAttachmentContract$'
+-v ./internal/taiga`. Código lido no container: `settings/config.py`, `settings/common.py`, `taiga/urls.py` e o
+`server.py` do `taigaio/taiga-protected:6.7.0`.
+
+### Upload: `POST <userstories|tasks>/attachments` (multipart)
+
+Campos `project`, `object_id`, `description` e o arquivo em `attached_file`.
+
+| Caso | Resultado |
+|---|---|
+| sucesso | 201 com `id`, `name`, `size`, `sha1`, `url`, `object_id`, `project`, `order` (0), `is_deprecated` (false), `from_comment` (false), `description`, `created_date`, `owner`; **sem `version`**. `size` e `sha1` batem com os calculados localmente |
+| nome com acento, espaço ou aspas (`relatório final.txt`, `with "quotes".txt`) | `name` guardado como enviado; só o caminho do `url` é normalizado (`relatorio-final.txt`, `with-quotes.txt`) |
+| nome com diretório (`../x`, `dir/sub/inner.txt`) | `name` vira o basename (`x`, `inner.txt`) |
+| nome com CR/LF, barra invertida ou entidade HTML | gravado **diferente** do enviado: o Go codifica CR/LF (`%0D%0A`), o Django guarda só o que vem depois da `\` e aplica o `html.unescape` do Python, que aceita entidades **sem `;`** (`report&amp.txt` → `report&.txt`, `report&#65.txt` e `report&#x41.txt` → `reportA.txt`; revisão independente da PR #12). Como a idempotência compara nome e `sha1`, a CLI recusa esses nomes (`usage`, renomear o arquivo) |
+| arquivo vazio (0 byte) | **400** `{"attached_file": ["The submitted file is empty."]}` |
+| `object_id` de story de outro projeto, com `project` deste | 400 `Project ID does not match between object and project` (`WrongArguments`) |
+| `object_id` inexistente | 400 `Object id issue doesn't exist` |
+| o mesmo arquivo duas vezes | dois anexos (sem unicidade no servidor) |
+| `version` da story depois do upload | **não muda** (1 → 1) |
+| membro sem admin (`svc`) | envia (201, `owner` = svc) e lista |
+| não membro de projeto privado | upload 403; `GET` do anexo 403; a listagem responde 200 **vazia** (o filtro esconde, não recusa) |
+
+O tamanho não tem limite no código do servidor; o limite vem do proxy. **No proxy da Basis, `client_max_body_size
+50M`** (informado pelo Cedric em 2026-10-02). Acima disso o nginx responde 413 com página HTML própria (o gateway do
+`compose.test.yml` usa o mesmo limite e reproduz o 413); a CLI traduz para `payload_too_large` e não impõe limite próprio.
+
+### Leitura
+
+| Requisição | Resultado |
+|---|---|
+| `GET userstories/attachments?project=&object_id=` | só os anexos daquele objeto, em ordem de `id`; paginada (`x-paginated: true`, `x-pagination-count`) |
+| `GET tasks/attachments?project=&object_id=` | idem para a task; anexos de story não aparecem |
+| sem `object_id` | todos os anexos daquele tipo no projeto |
+| `GET <tipo>/attachments/<id>` | o anexo, com `url` assinado na hora (token novo a cada leitura em segundo diferente). `preview_url` e, em imagem, `thumbnail_card_url` também levam token e abrem o arquivo (ou a miniatura) sem autenticação (revisão adversarial da #251); a CLI tira da saída toda chave terminada em `url` e todo texto com `token=` |
+| `GET tasks/attachments/<id de anexo de story>` | **200** com o anexo da story: o detalhe **não confere o tipo**. Conferir só o `object_id` não basta (id de story e de task podem coincidir); a CLI confere que o id está na **lista** do objeto, que filtra pelo tipo |
+
+### Download: o `url`
+
+`url` = `MEDIA_URL` + caminho + `?token=<assinatura>` + `#_taiga-refresh=<tipo>:<id>`. `MEDIA_URL` =
+`<TAIGA_SITES_SCHEME>://<TAIGA_SITES_DOMAIN>/media/`, a mesma origem da API. O storage é
+`taiga_contrib_protected.storage.ProtectedFileSystemStorage`: o token é um `TimestampSigner` (sal `taiga-protected`)
+sobre o caminho, conferido pelo `taiga-protected` com `MAX_AGE` (360 s no compose; 3600 s se ausente), que responde
+200 vazio com `X-Accel-Redirect: /_protected/<caminho>`. Quem entrega os bytes é o nginx do gateway, a partir do volume
+de mídia. O fragmento nunca vai ao servidor.
+
+| Onde | `GET <url>` | Resultado |
+|---|---|---|
+| só `taiga-back` publicado (o `compose.test.yml` até a #251) | com token, sem token, token adulterado, com e sem `Authorization`, `/static/...` | **404** (página `Not Found` do Django) em todos: `DEBUG=False`, e o `taiga/urls.py` só serve `/media/` com `DEBUG`. O arquivo existia em `/taiga-back/media/attachments/...` |
+| gateway do `compose.test.yml` (desde a #251) | token válido, com ou sem `Authorization` | 200, `text/plain`, bytes iguais ao enviado |
+| idem | token do upload (outro, mais antigo, dentro do `MAX_AGE`) | 200 |
+| idem | sem token, com ou sem `Authorization` | 403 (o `Authorization` não substitui o token) |
+| idem | token adulterado | 403 |
+
+Token expirado (`MAX_AGE`) não foi forçado: o `taiga-protected` recusa com o mesmo 403 da assinatura inválida
+(`BadData` do `itsdangerous`, lido no `server.py`).
+
+**Gate do download (Task 3, Step 3), decidido em 2026-10-02 (Cedric, opção B):** o `compose.test.yml` ganhou, no
+default, o `taiga-protected` e um gateway nginx (`taiga-gateway`) em `127.0.0.1:8000`, como o gateway do
+`taiga-docker`: `/api/` e `/admin/` vão para o `taiga-back`, que deixou de publicar porta; `/media/` vai para o
+`taiga-protected`; `/_protected/` é `internal` e serve o volume `taiga-media`, compartilhado com o `taiga-back`.
+`client_max_body_size 50M`, igual ao proxy da Basis. A URL de teste continua `http://localhost:8000`, e a CI cobre o
+download e o 413.

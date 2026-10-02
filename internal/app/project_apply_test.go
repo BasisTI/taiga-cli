@@ -190,6 +190,7 @@ func TestPreviewProject(t *testing.T) {
 
 // statusAPI serves the status and field catalogs the way the local Taiga 6.7 does.
 type statusAPI struct {
+	noTransfer
 	permissions string
 	statuses    []Object
 	fields      []Object
