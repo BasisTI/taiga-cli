@@ -83,7 +83,8 @@ func BuildPatch(before Object, p Patch) (Object, error) {
 				return nil, err
 			}
 		}
-		if !equal(old, v) {
+		// A null for a field the read did not carry is sent: equal(nil, nil) would skip it.
+		if _, known := before[k]; !equal(old, v) || !known {
 			out[k] = v
 		}
 	}

@@ -7,12 +7,12 @@ import (
 )
 
 // swimlaneFake is the story fake with two swimlanes (A is the default) and the stories spread
-// over them: 246 has none, 247 is in A, 248 in B.
+// over them: 246 has none, 247 is in A, 248 in B. The catalog is in board order, as Taiga sends it.
 func swimlaneFake(t *testing.T) (*storyFake, *[]recorded) {
 	f, calls := newStoryFake(t)
 	f.swimlanes = []map[string]any{
-		{"id": 22, "name": "B", "order": 20, "project": 37, "statuses": []any{}},
 		{"id": 21, "name": "A", "order": 10, "project": 37, "statuses": []any{}},
+		{"id": 22, "name": "B", "order": 20, "project": 37, "statuses": []any{}},
 	}
 	f.defaultSwimlane = 21
 	f.stories[6809]["swimlane"] = 21
@@ -60,7 +60,7 @@ func TestSwimlaneListEmptyProject(t *testing.T) {
 
 func TestSwimlaneTextEscapesControls(t *testing.T) {
 	f, _ := swimlaneFake(t)
-	f.swimlanes[0]["name"] = "B\x1b[31m\u202eevil\nid: 1"
+	f.swimlanes[1]["name"] = "B\x1b[31m\u202eevil\nid: 1"
 	text, stderr, code := runIn(t, f.env(), "", "swimlane", "list", "--output", "text")
 	if code != 0 {
 		t.Fatalf("%d %s", code, stderr)

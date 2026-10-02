@@ -152,6 +152,9 @@ func (s *Service) Stories(ctx context.Context, filters url.Values) ([]Object, er
 		if ID(o["project"]) != ID(s.Project["id"]) {
 			return nil, fmt.Errorf("list returned another project")
 		}
+		if _, ok := o["swimlane"]; !ok && filters.Has("swimlane") {
+			return nil, fmt.Errorf("list returned a story without the swimlane field")
+		}
 		view, err := s.StoryView(o)
 		if err != nil {
 			return nil, err
