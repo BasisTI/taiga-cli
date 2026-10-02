@@ -46,19 +46,19 @@ var storyTextKeys = []string{"ref", "id", "version", "subject", "status", "is_cl
 
 func (a *App) renderCurated(v any) error { return a.renderKeys(v, storyTextKeys) }
 
-// renderKeys writes v as JSON, or in text as the given keys of each object. Objects read from
-// Taiga go through app.Scrub first: signed media URLs keep their key, not their token.
+// renderKeys writes v as JSON, or in text as the given keys of each object, redacted on the
+// way out (presentable): signed media URLs keep their key, not their token.
 func (a *App) renderKeys(v any, textKeys []string) error {
-	switch x := v.(type) {
-	case app.Object, []app.Object:
-		v = app.Scrub(x)
+	v, err := presentable(v)
+	if err != nil {
+		return err
 	}
 	mode, err := output.DetectMode(a.output, a.OutTTY)
 	if err != nil {
 		return err
 	}
 	if mode == output.JSON {
-		return output.WriteJSON(a.Out, v)
+		return a.writeJSON(v)
 	}
 	switch x := v.(type) {
 	case app.Object:
@@ -88,11 +88,11 @@ func (a *App) renderKeys(v any, textKeys []string) error {
 			}
 			fields = append(fields, output.Field{Key: k, Value: text})
 		}
-		return output.WriteFields(a.Out, fields)
+		return a.writeFields(fields)
 	case []app.Object:
 		for i, o := range x {
 			if i > 0 {
-				if _, err := fmt.Fprintln(a.Out); err != nil {
+				if err := a.printLine(""); err != nil {
 					return err
 				}
 			}
@@ -120,7 +120,7 @@ func (a *App) renderKeys(v any, textKeys []string) error {
 		for _, k := range keys {
 			fields = append(fields, output.Field{Key: k, Value: escapeJSON(string(object[k]))})
 		}
-		return output.WriteFields(a.Out, fields)
+		return a.writeFields(fields)
 	}
 }
 

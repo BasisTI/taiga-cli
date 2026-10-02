@@ -46,3 +46,70 @@ func TestStoryOutputsHideSignedPhotos(t *testing.T) {
 		t.Fatalf("%s", out)
 	}
 }
+
+// photoPlanFake has a signed photo in the description of story 246 and in a custom field
+// (Link) of the same story, so a plan that keeps what is there carries it.
+func photoPlanFake(t *testing.T) (*storyFake, *[]recorded) {
+	f, calls := commentFake(t)
+	f.stories[6808]["description"] = "![photo](" + signedPhoto + ")"
+	f.defs = map[string][]map[string]any{"userstory-custom-attributes": {
+		{"id": 40, "name": "Notas", "type": "text", "project": 37},
+		{"id": 41, "name": "Link", "type": "url", "project": 37},
+	}}
+	f.values[values6808] = map[string]any{"user_story": 6808, "version": 1, "attributes_values": map[string]any{"41": signedPhoto}}
+	return f, calls
+}
+
+// Dry-run plans are curated output too: the token value is hidden in JSON and in text, for
+// what Taiga already holds (description, other fields) and for what was given on input.
+func TestStoryPlansHideSignedPhotos(t *testing.T) {
+	for _, mode := range []string{"json", "text"} {
+		for _, c := range []struct {
+			args  []string
+			stdin string
+		}{
+			{[]string{"story", "update", "246", "--append-description", "ordinary note", "--dry-run"}, ""},
+			{[]string{"story", "field", "set", "246", "Notas=ordinary", "--dry-run"}, ""},
+			{[]string{"story", "comment", "246", "--body", signedPhoto, "--dry-run"}, ""},
+			{[]string{"story", "create", "--subject", "new", "--description-file", "-", "--dry-run"}, signedPhoto},
+		} {
+			f, calls := photoPlanFake(t)
+			out, stderr, code := runIn(t, f.env(), c.stdin, append(c.args, "--output", mode)...)
+			if code != 0 {
+				t.Fatalf("%v %s: %d %s", c.args, mode, code, stderr)
+			}
+			if strings.Contains(out+stderr, "PHOTOSECRET") || !strings.Contains(out, "token=…") {
+				t.Errorf("%v %s: %s", c.args, mode, out)
+			}
+			if len(writes(calls)) != 0 {
+				t.Fatalf("dry-run wrote: %+v", writes(calls))
+			}
+		}
+	}
+}
+
+// Only the printout is redacted: the real writes send the values as given and as stored.
+func TestStoryWritesSendSignedPhotosUnchanged(t *testing.T) {
+	f, calls := photoPlanFake(t)
+	for _, args := range [][]string{
+		{"story", "update", "246", "--append-description", "ordinary note"},
+		{"story", "field", "set", "246", "Notas=ordinary"},
+		{"story", "comment", "246", "--body", signedPhoto},
+	} {
+		if _, stderr, code := runIn(t, f.env(), "", args...); code != 0 {
+			t.Fatalf("%v: %d %s", args, code, stderr)
+		}
+	}
+	if _, stderr, code := runIn(t, f.env(), signedPhoto, "story", "create", "--subject", "new", "--description-file", "-"); code != 0 {
+		t.Fatalf("create: %d %s", code, stderr)
+	}
+	w := writes(calls)
+	if len(w) != 4 {
+		t.Fatalf("%+v", w)
+	}
+	for _, c := range w {
+		if b := bodyJSON(t, c.body); !strings.Contains(b, "PHOTOSECRET%3A1") {
+			t.Errorf("%s %s sent without the original token: %s", c.method, c.path, b)
+		}
+	}
+}

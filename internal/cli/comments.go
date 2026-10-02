@@ -84,7 +84,7 @@ func (a *App) renderComments(items []app.Object) error {
 		return err
 	}
 	if mode == output.JSON {
-		return output.WriteJSON(a.Out, items)
+		return a.writeJSON(items)
 	}
 	text := []app.Object{}
 	for _, o := range items {

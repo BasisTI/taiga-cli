@@ -233,7 +233,7 @@ func (a *App) printStatus(ctx context.Context, diagnose bool) error {
 	}
 	mode, _ := output.DetectMode(a.output, a.OutTTY)
 	if mode == output.JSON {
-		if err := output.WriteJSON(a.Out, v); err != nil {
+		if err := a.writeJSON(v); err != nil {
 			return err
 		}
 	} else {
@@ -250,7 +250,7 @@ func (a *App) printStatus(ctx context.Context, diagnose bool) error {
 				fields[i].Value = strconv.Quote(f.Value) // one line per key: the server's text cannot forge another check
 			}
 		}
-		if err := output.WriteFields(a.Out, fields); err != nil {
+		if err := a.writeFields(fields); err != nil {
 			return err
 		}
 	}
@@ -291,8 +291,7 @@ func (a *App) authLogoutCmd() *cobra.Command {
 					return err
 				}
 			}
-			_, err = io.WriteString(a.Out, "logged out of "+r.URL+" ("+r.Username+")\n")
-			return err
+			return a.printLine("logged out of " + r.URL + " (" + r.Username + ")")
 		},
 	}
 }

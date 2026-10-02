@@ -109,7 +109,7 @@ func (a *App) renderStoryFields(ctx context.Context, service *app.Service, story
 		return err
 	}
 	if mode == output.JSON {
-		return output.WriteJSON(a.Out, result)
+		return a.writeJSON(result)
 	}
 	lines := []output.Field{{Key: "ref", Value: fmt.Sprint(story["ref"])}, {Key: "id", Value: fmt.Sprint(story["id"])},
 		{Key: "version", Value: fmt.Sprint(values["version"])}, {Key: "url", Value: fmt.Sprint(view["url"])}}
@@ -128,7 +128,7 @@ func (a *App) renderStoryFields(ctx context.Context, service *app.Service, story
 			lines = append(lines, output.Field{Key: "#" + id + " (no definition)", Value: jsonValue(stored[id])})
 		}
 	}
-	return output.WriteFields(a.Out, lines)
+	return a.writeFields(lines)
 }
 
 // jsonValue prints plain text as is; empty text, text with control or format characters (line

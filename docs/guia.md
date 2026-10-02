@@ -86,7 +86,7 @@ taiga epic get 12 --output text         # descrição e stories vinculadas, na o
 
 ## Fotos e outros links assinados
 
-Toda saída dos comandos curados (todos menos `taiga api`, que mostra a resposta do Taiga como veio) esconde o valor dos parâmetros de token, mantendo as chaves e o resto da URL. As fotos de usuário (`photo` e `big_photo` em `owner_extra_info`, `assigned_to_extra_info` e no autor dos comentários), o logo do projeto e os links de anexo são URLs assinadas de mídia que abrem o arquivo sem autenticação enquanto o token vale. Em `story get`, a foto sai como `"photo": "https://…/media/user/…?token=…"`.
+Toda saída dos comandos curados (todos menos `taiga api`, que mostra a resposta do Taiga como veio) esconde o valor dos parâmetros de token em tudo o que imprime, inclusive nos planos de `--dry-run`, mantendo as chaves e o resto da URL. Só a impressão muda: a escrita de verdade envia os valores como vieram e como estão guardados. As fotos de usuário (`photo` e `big_photo` em `owner_extra_info`, `assigned_to_extra_info` e no autor dos comentários), o logo do projeto e os links de anexo são URLs assinadas de mídia que abrem o arquivo sem autenticação enquanto o token vale. Em `story get`, a foto sai como `"photo": "https://…/media/user/…?token=…"`.
 
 ## Anexos
 

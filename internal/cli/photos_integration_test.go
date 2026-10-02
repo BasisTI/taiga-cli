@@ -80,6 +80,36 @@ func TestIntegrationStoryOutputsHideUserPhotos(t *testing.T) {
 			}
 		}
 	}
+	// Dry-run plans: the signed photo already in the description, or given on input, is
+	// printed without its token; the real write stores it as given.
+	if _, errOut, code := runIn(t, svc, "![photo]("+me.Photo+")", "story", "update", ref, "--description-file", "-"); code != 0 {
+		t.Fatalf("store the photo in the description: %d %s", code, errOut)
+	}
+	raw := storyJSON(t, svc, "", "api", "GET", "userstories/by_ref", "--query", "project="+fmt.Sprint(story["project"]), "--query", "ref="+ref)
+	if d := fmt.Sprint(raw["description"]); !strings.Contains(d, tokens[0]) && !strings.Contains(d, url.QueryEscape(tokens[0])) {
+		t.Fatalf("the real write did not store the original URL (%d bytes)", len(d))
+	}
+	for _, mode := range []string{"json", "text"} {
+		for _, c := range []struct {
+			stdin string
+			args  []string
+		}{
+			{"", []string{"story", "update", ref, "--append-description", "ordinary note", "--dry-run"}},
+			{"", []string{"story", "comment", ref, "--body", me.BigPhoto, "--dry-run"}},
+			{me.Photo, []string{"story", "create", "--subject", "plan", "--description-file", "-", "--dry-run"}},
+		} {
+			out, errOut, code := runIn(t, svc, c.stdin, append(c.args, "--output", mode)...)
+			if code != 0 {
+				t.Fatalf("%v %s: %d %s", c.args, mode, code, errOut)
+			}
+			for _, tok := range tokens {
+				if strings.Contains(out+errOut, tok) || strings.Contains(out+errOut, url.QueryEscape(tok)) {
+					t.Fatalf("%v %s printed the photo token", c.args, mode)
+				}
+			}
+		}
+	}
+
 	got := storyJSON(t, svc, "", "story", "get", ref)
 	owner, _ := got["owner_extra_info"].(map[string]any)
 	photo, _ := owner["photo"].(string)
