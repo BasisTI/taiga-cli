@@ -114,8 +114,12 @@ func TestIntegrationStoryLifecycle(t *testing.T) {
 	if got := storyRefs(t, env, "--tag", tag, "--closed"); got != ref {
 		t.Fatalf("closed list: %q", got)
 	}
-	if _, errOut, code := runIn(t, env, "", "story", "update", ref, "--epic", "1"); code != 2 || !strings.Contains(errOut, "unsupported_operation") {
+	// An epic ref that is not an epic of the project is refused before any write.
+	if _, errOut, code := runIn(t, env, "", "story", "update", ref, "--subject", "never", "--epic", "99999"); code != 5 || !strings.Contains(errOut, "not_found") {
 		t.Fatalf("--epic: %d %s", code, errOut)
+	}
+	if st := storyJSON(t, env, "", "story", "get", ref); st["version"] != closed["version"] {
+		t.Fatalf("--epic with an unknown epic wrote: version %v → %v", closed["version"], st["version"])
 	}
 }
 
