@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -67,9 +66,9 @@ func (a *App) authLoginCmd() *cobra.Command {
 				}
 				pw = bytes.TrimRight(b, "\r\n")
 			case a.stdinIsTTY():
-				_, _ = io.WriteString(a.Err, "Password: ")
+				a.prompt("Password: ")
 				b, err := term.ReadPassword(int(a.In.(*os.File).Fd()))
-				_, _ = io.WriteString(a.Err, "\n")
+				a.prompt("\n")
 				if err != nil {
 					return err
 				}
@@ -244,11 +243,6 @@ func (a *App) printStatus(ctx context.Context, diagnose bool) error {
 		fields = append(fields, output.Field{Key: "session", Value: v.Session.ExpiresAt + " " + v.Session.Path})
 		for _, ch := range v.Checks {
 			fields = append(fields, output.Field{Key: "check " + ch.Name, Value: ch.Status + " " + ch.Detail})
-		}
-		for i, f := range fields {
-			if strings.ContainsFunc(f.Value, unsafeRune) {
-				fields[i].Value = strconv.Quote(f.Value) // one line per key: the server's text cannot forge another check
-			}
 		}
 		if err := a.writeFields(fields); err != nil {
 			return err

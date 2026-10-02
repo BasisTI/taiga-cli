@@ -181,7 +181,7 @@ taiga project apply -f taiga-project.toml
 
 Without a terminal on stdout, `taiga` prints JSON; on a terminal it prints text. Force either with `--output json` or `--output text`. Errors go to stderr as `{"error":{"code","source","stage","cause","recovery"}}`; `code` is stable and `cause` never contains a secret. In text mode, any value with control or bidi characters (often the server's own text) is printed Go-quoted, on one line.
 
-Every curated command (all but `taiga api`, which prints Taiga's answer as is) hides the value of token parameters in everything it prints, `--dry-run` plans included, keeping the keys and the rest of the URL (only the printout changes: a real write sends the values as given and as stored): user photos (`photo`, `big_photo` in `owner_extra_info`, `assigned_to_extra_info`, the comment author), project logos and attachment links are signed media URLs that open the file without authentication while the token lasts. `story get` shows `"photo": "https://…/media/user/…/photo.png?token=…"`.
+Every curated command (all but `taiga api`, which prints Taiga's answer as is) hides the value of token parameters in everything it prints, on stdout and on stderr (errors and warnings), `--dry-run` plans included, keeping the keys and the rest of the URL (only the printout changes: a real write sends the values as given and as stored): user photos (`photo`, `big_photo` in `owner_extra_info`, `assigned_to_extra_info`, the comment author), project logos and attachment links are signed media URLs that open the file without authentication while the token lasts. `story get` shows `"photo": "https://…/media/user/…/photo.png?token=…"`.
 
 | Exit | Meaning |
 |---|---|

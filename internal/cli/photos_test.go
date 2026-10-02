@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -111,5 +112,51 @@ func TestStoryWritesSendSignedPhotosUnchanged(t *testing.T) {
 		if b := bodyJSON(t, c.body); !strings.Contains(b, "PHOTOSECRET%3A1") {
 			t.Errorf("%s %s sent without the original token: %s", c.method, c.path, b)
 		}
+	}
+}
+
+// Errors carry text from the user and from the server: stderr is redacted like stdout.
+func TestStderrHidesSignedPhotos(t *testing.T) {
+	for _, mode := range []string{"json", "text"} {
+		f, calls := fieldFake(t)
+		out, stderr, code := runIn(t, f.env(), "", "story", "field", "set", "246", "Data de entrega="+signedPhoto, "--dry-run", "--output", mode)
+		if code != 2 || out != "" || len(writes(calls)) != 0 {
+			t.Fatalf("%s: %d %q %s", mode, code, out, stderr)
+		}
+		if strings.Contains(stderr, "PHOTOSECRET") || !strings.Contains(stderr, "token=…") || !strings.Contains(stderr, "YYYY-MM-DD") {
+			t.Errorf("%s: %s", mode, stderr)
+		}
+	}
+}
+
+// Warnings go to stderr through the same redaction.
+func TestWarningsHideTokens(t *testing.T) {
+	url := authServer(t)
+	home := t.TempDir()
+	state := home + "/token=WARNINGSECRET"
+	if err := os.WriteFile(state, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, _ := runIn(t, map[string]string{"HOME": home, "TAIGA_STATE_DIR": state}, "pw\n", "auth", "login", "--url", url, "--username", "svc", "--password-stdin", "--insecure-storage")
+	if !strings.Contains(stderr, "warning [") || strings.Contains(stderr, "WARNINGSECRET") {
+		t.Fatalf("%s", stderr)
+	}
+}
+
+// Text output redacts once, before escaping: what follows an escaped line break is kept.
+func TestTextKeepsTheTailAfterARedactedToken(t *testing.T) {
+	f, calls := photoPlanFake(t)
+	f.stories[6808]["description"] = "see " + signedPhoto + "\nKEEP_EXISTING"
+	f.stories[6808]["subject"] = "link http://h/p?token=SUBJECTSECRET\nKEEP_SUBJECT"
+	out, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--append-description", "KEEP_APPENDED", "--dry-run", "--output", "text")
+	if code != 0 || strings.Contains(out, "PHOTOSECRET") || !strings.Contains(out, `KEEP_EXISTING\n\nKEEP_APPENDED`) {
+		t.Fatalf("plan: %d %s %s", code, out, stderr)
+	}
+	out, stderr, code = runIn(t, f.env(), "", "story", "get", "246", "--output", "text")
+	if code != 0 || strings.Contains(out, "SUBJECTSECRET") || !strings.Contains(out, `token=…\nKEEP_SUBJECT`) {
+		t.Fatalf("get: %d %s %s", code, out, stderr)
+	}
+	if len(writes(calls)) != 0 {
+		t.Fatalf("%+v", writes(calls))
 	}
 }

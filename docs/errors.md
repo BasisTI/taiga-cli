@@ -1,6 +1,6 @@
 # Códigos de erro da taiga-cli
 
-Todo erro sai no stderr como `{"error":{"code","source","stage","cause","recovery"}}` (ou em texto, num terminal). O `code` é estável e pode ser usado em scripts; o `cause` nunca contém segredo. `source` e `stage` são omitidos quando não se aplicam.
+Todo erro sai no stderr como `{"error":{"code","source","stage","cause","recovery"}}` (ou em texto, num terminal). O `code` é estável e pode ser usado em scripts; o `cause` nunca contém segredo. Todo campo de texto do erro (e dos avisos `warning [...]`) passa pela mesma redação da saída: o valor de parâmetros de token, como o de uma URL assinada de foto citada na causa, vira `…`; em texto, o que tem caractere de controle ou bidi sai entre aspas. `source` e `stage` são omitidos quando não se aplicam.
 
 ## Exit codes
 

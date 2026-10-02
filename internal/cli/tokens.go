@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -69,9 +68,7 @@ func (a *App) resolver(rc *RunContext) (*auth.Resolver, error) {
 		Secret:   configuredSecret(a.Env, host, rc.Paths, ref),
 		HTTP:     a.httpClient(),
 		Now:      time.Now,
-		Warn: func(code, msg string) {
-			_, _ = fmt.Fprintf(a.Err, "warning [%s]: %s\n", code, msg)
-		},
+		Warn:     a.warn,
 	}, nil
 }
 

@@ -149,7 +149,7 @@ func (a *App) attachmentDownloadCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		result, err := service.DownloadAttachment(ctx, kind, owner, id, dest, overwrite, a.Out)
+		result, err := service.DownloadAttachment(ctx, kind, owner, id, dest, overwrite, a.rawOut())
 		if err != nil || to == "-" {
 			return err // with --to -, stdout carries only the file
 		}
