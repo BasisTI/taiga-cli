@@ -75,8 +75,8 @@ Read-only commands. Every object they print has the `token=` value of signed med
 
 | Command | What it does |
 |---|---|
-| `taiga project list [--search TEXT]` | The projects you are a member of; needs no selected project |
-| `taiga project get [SLUG\|ID]` | A project; without an argument, the selected one, with `source` saying where it was selected (flag, env, `.taiga.toml`, config) |
+| `taiga project list [--search TEXT]` | The projects you are a member of (checked locally too); needs no selected project |
+| `taiga project get [SLUG\|ID]` | A project; without an argument, the selected one, with `source` saying where it was selected (flag, env, `.taiga.toml`, config; `argument` when given). Credentials of the project (`*_csv_uuid`, `transfer_token`) are never printed |
 | `taiga user list [--search TEXT]` | The project members (never other users), with `is_admin` and `role_name` from the membership |
 | `taiga milestone list [--search TEXT] [--closed[=false]]` | The project's milestones (sprints); JSON output carries each sprint's stories |
 | `taiga epic list [--search TEXT] [--closed[=false]]` | The project's epics, with their web `url` |
@@ -223,7 +223,7 @@ The token for each call is resolved in this order:
 taiga auth status --diagnose --output text
 ```
 
-The last check, `project`, reads the selected project (it only reads) and reports its `id`, `slug` and where it was selected; whether you are a member and an admin; the permissions the curated commands need that you lack (`view_us`, `modify_us`, `add_us`, `comment_us`, `view_tasks`, `add_task`, `modify_task`, `modify_epic`, `admin_project_values`); the epics, kanban and backlog modules; and the number of swimlanes. JSON output also carries them under `data`. It is `skipped` without a selected project or when the identity check (`users/me`) failed, and `failed` when the project does not exist or the account cannot see it. Missing permissions do not fail it: they limit some commands (`project apply` needs `admin_project_values`).
+The last check, `project`, reads the selected project (it only reads) and reports its `id`, `slug` and where it was selected; whether you are a member and an admin; the permissions the curated commands need that you lack (`view_us`, `modify_us`, `add_us`, `comment_us`, `view_tasks`, `add_task`, `modify_task`, `modify_epic`, `admin_project_values`); the epics, kanban and backlog modules; and the number of swimlanes. JSON output also carries them under `data`. It is `skipped` without a selected project or when the identity check (`users/me`) failed, and `failed` when the project cannot be read: it does not exist, the account cannot see it, or another error (network, server) stopped the read. Missing permissions do not fail it: they limit some commands (`project apply` needs `admin_project_values`).
 
 ## Coding agents and sandboxes
 

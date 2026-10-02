@@ -198,7 +198,7 @@ Flags comuns: `--project`, `--output`, `--dry-run` (em escritas).
 | Comando | Faz |
 |---|---|
 | `taiga project list [--search]` | Projetos de que a conta é membro (`projects?member=<users/me>`); não exige projeto selecionado |
-| `taiga project get [SLUG\|ID]` | Detalhe; sem argumento, o projeto selecionado, com `source` (flag, env, `.taiga.toml`, config) |
+| `taiga project get [SLUG\|ID]` | Detalhe; sem argumento, o projeto selecionado, com `source` (flag, env, `.taiga.toml`, config ou `argument`); `*_csv_uuid` e `transfer_token` nunca saem |
 | `taiga user list [--search]` | Membros do projeto (`memberships` ∩ `users?project=`), com `is_admin` e `role_name`; busca sem normalizar acento |
 | `taiga status list [--kind story\|task]` | Status do projeto |
 | `taiga swimlane list` | Swimlanes do projeto, na ordem do board, com `is_default`; só leitura (criar, renomear e reordenar ficam na interface web) |

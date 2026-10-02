@@ -599,9 +599,12 @@ id 5 no seed atual) e `svc` (membro sem admin, convidado por e-mail) em projetos
 | `GET projects/<id>` como membro | traz `i_am_member`, `i_am_admin`, `my_permissions`, `is_epics_activated`, `is_kanban_activated`, `is_backlog_activated`, `swimlanes`, `default_swimlane` |
 | `my_permissions` de `svc` com o papel padrão do template | `view_project`, `view_us`/`add_us`/`modify_us`/`comment_us`/`delete_us`, o mesmo para task, epic, issue, milestone e wiki; **sem** `admin_project_values` nem `admin_roles` |
 
+| `GET projects/<id>` como admin (inclusive superusuário sem membership) | traz `epics_csv_uuid`, `userstories_csv_uuid`, `tasks_csv_uuid`, `issues_csv_uuid` e `transfer_token`. Com um `*_csv_uuid`, `GET <tipo>/csv?uuid=` serve a exportação **sem autenticação** (`csv_perms = AllowAny`, lido no código; revisão adversarial da #253) |
+
 Consequência na CLI: `project list` manda `member=<id de users/me>` (a lista do superusuário seria o servidor inteiro)
-e `--search` filtra localmente por nome e slug, sem diferenciar maiúsculas; o `q` do servidor não é enviado, porque
-não é substring e esconderia resultados.
+confere `i_am_member` localmente, e `--search` filtra localmente por nome e slug, sem diferenciar maiúsculas; o `q` do servidor não é enviado, porque
+não é substring e esconderia resultados. `project list` e `project get` nunca imprimem os `*_csv_uuid` nem o
+`transfer_token`.
 
 ### Paginação
 

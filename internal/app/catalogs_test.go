@@ -20,8 +20,9 @@ func TestProjectsListsMembershipsOfMe(t *testing.T) {
 	f := &fakeAPI{
 		objects: map[string]string{"users/me": `{"id":5,"username":"admin"}`},
 		lists: map[string]string{"projects": `[
-			{"id":1,"slug":"infra-2025","name":"Infra 2025","logo_small_url":"http://t/media/logo.png?token=SECRET","my_permissions":["view_us"]},
-			{"id":2,"slug":"outro","name":"Projeto Ágil"}]`},
+			{"id":1,"slug":"infra-2025","name":"Infra 2025","i_am_member":true,"logo_small_url":"http://t/media/logo.png?token=SECRET","my_permissions":["view_us"],"userstories_csv_uuid":"SECRET-uuid","transfer_token":"SECRET-transfer"},
+			{"id":2,"slug":"outro","name":"Projeto Ágil","i_am_member":true},
+			{"id":3,"slug":"public","name":"Público","i_am_member":false}]`},
 	}
 	all, err := Projects(context.Background(), f, "")
 	if err != nil {

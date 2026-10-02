@@ -64,6 +64,20 @@ func found(search string, values ...any) bool {
 	return false
 }
 
+// projectCredentials are project keys that work as credentials: with a *_csv_uuid, Taiga serves
+// the CSV export of the project without authentication; transfer_token accepts the ownership
+// transfer. They are never printed.
+var projectCredentials = []string{"epics_csv_uuid", "userstories_csv_uuid", "tasks_csv_uuid", "issues_csv_uuid", "transfer_token"}
+
+// projectView is the output form of a project: credentials removed, signed URLs hidden.
+func projectView(p Object) Object {
+	out := scrub(p).(Object)
+	for _, k := range projectCredentials {
+		delete(out, k)
+	}
+	return out
+}
+
 // Projects lists the projects the account is a member of. Without member=, Taiga lists every
 // project the account can see: public ones too, and the whole server for a superuser. The
 // server's q= is a full-text search, not a substring, so search is applied here only.
@@ -85,15 +99,16 @@ func Projects(ctx context.Context, api API, search string) ([]Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		if found(search, p["name"], p["slug"]) {
-			out = append(out, scrub(p).(Object))
+		// member= is checked here too: a server that ignored it would list every visible project.
+		if p["i_am_member"] == true && found(search, p["name"], p["slug"]) {
+			out = append(out, projectView(p))
 		}
 	}
 	return out, nil
 }
 
-// ProjectView is the selected project as read, with signed URLs hidden.
-func (s *Service) ProjectView() Object { return scrub(s.Project).(Object) }
+// ProjectView is the selected project as read, without its credentials and signed URLs.
+func (s *Service) ProjectView() Object { return projectView(s.Project) }
 
 // Users lists the members of the project: users?project= also lists non-members, and
 // memberships has no username, so both are read. Pending invitations (no user) are left out.

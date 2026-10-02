@@ -30,7 +30,7 @@ func newCatalogFake(t *testing.T) (*catalogFake, string, *[]recorded) {
 		case path == "users/me":
 			write(map[string]any{"id": 5, "username": "admin"})
 		case path == "projects" && q.Get("member") == "5":
-			write([]any{f.project, map[string]any{"id": 38, "slug": "outro", "name": "Outro" + f.evil}})
+			write([]any{f.project, map[string]any{"id": 38, "slug": "outro", "name": "Outro" + f.evil, "i_am_member": true}})
 		case path == "users" && q.Get("project") == "37":
 			write([]any{map[string]any{"id": 5, "username": "admin", "full_name": "Administrador" + f.evil, "photo": "http://t/p.png?token=SECRET"},
 				map[string]any{"id": 9, "username": "outsider", "full_name": "Fora"}})
@@ -217,5 +217,53 @@ func TestCatalogTextEscapesControls(t *testing.T) {
 		if strings.ContainsAny(out, "\x1b\u202e") || strings.Contains(out, "\nid: 1") {
 			t.Fatalf("%v: %q", args, out)
 		}
+	}
+}
+
+func TestProjectOutputHidesProjectCredentials(t *testing.T) {
+	f, url, _ := newCatalogFake(t)
+	for k, v := range map[string]any{"userstories_csv_uuid": "CSVSECRET-us", "tasks_csv_uuid": "CSVSECRET-t", "issues_csv_uuid": "CSVSECRET-i",
+		"epics_csv_uuid": "CSVSECRET-e", "transfer_token": "5:TRANSFERSECRET"} {
+		f.project[k] = v
+	}
+	for _, args := range [][]string{{"project", "get"}, {"project", "list"}, {"project", "get", "--output", "text"}, {"auth", "status", "--diagnose"}} {
+		out, stderr, code := runIn(t, catalogEnv(url), "", args...)
+		if code != 0 && args[0] != "auth" {
+			t.Fatalf("%v: %d %s", args, code, stderr)
+		}
+		if strings.Contains(out+stderr, "SECRET") {
+			t.Fatalf("%v leaked a project credential: %s", args, out)
+		}
+	}
+}
+
+func TestProjectListKeepsOnlyMemberships(t *testing.T) {
+	f, url, _ := newCatalogFake(t)
+	f.project["i_am_member"] = false
+	out, stderr, code := runIn(t, catalogEnv(url), "", "project", "list")
+	if code != 0 || strings.Contains(out, "infra-2025") || !strings.Contains(out, `"outro"`) {
+		t.Fatalf("%d %s %s", code, out, stderr)
+	}
+}
+
+func TestEpicGetRejectsBadRefBeforeNetwork(t *testing.T) {
+	_, url, calls := newCatalogFake(t)
+	for _, ref := range []string{"abc", "0", "1.5", "-3"} {
+		_, stderr, code := runIn(t, catalogEnv(url), "", "epic", "get", ref)
+		if code != 2 || !strings.Contains(stderr, `"usage"`) {
+			t.Fatalf("%s: %d %s", ref, code, stderr)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("bad ref reached the network: %+v", *calls)
+	}
+}
+
+func TestProjectGetTextEscapesControls(t *testing.T) {
+	f, url, _ := newCatalogFake(t)
+	f.project["name"] = "Infra\x1b[31m\u202e\nsource: forged"
+	out, stderr, code := runIn(t, catalogEnv(url), "", "project", "get", "--output", "text")
+	if code != 0 || strings.ContainsAny(out, "\x1b\u202e") || strings.Contains(out, "\nsource: forged") {
+		t.Fatalf("%d %q %s", code, out, stderr)
 	}
 }

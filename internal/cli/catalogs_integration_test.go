@@ -44,8 +44,13 @@ func TestIntegrationCatalogCommands(t *testing.T) {
 	slug := env["TAIGA_PROJECT"]
 	storyJSON(t, env, "", "api", "PATCH", "projects/"+pid, "-F", "is_epics_activated=true")
 
-	// project list: only memberships; a project svc is not in stays out.
+	// project list: only memberships. A private project svc is not in is hidden anyway; a public
+	// one is listed by Taiga without member=, so it proves the filter.
 	other := storyJSON(t, env, "", "api", "POST", "projects", "-f", "name=cli-test-catalogs-other-"+suffix, "-f", "description=taiga-cli")
+	public := storyJSON(t, env, "", "api", "POST", "projects", "-f", "name=cli-test-catalogs-public-"+suffix, "-f", "description=taiga-cli", "-F", "is_private=false")
+	if seen := catalogList(t, svc, "api", "GET", "projects", "--paginate"); !strings.Contains(fmt.Sprint(fieldOf(seen, "id")), fmt.Sprint(public["id"])) {
+		t.Fatalf("svc does not see the public project through the API: the check below would prove nothing")
+	}
 	projects := catalogList(t, svc, "project", "list", "--search", suffix)
 	if fieldOf(projects, "slug") != slug {
 		t.Fatalf("svc project list: %s", fieldOf(projects, "slug"))

@@ -32,6 +32,9 @@ func (a *App) epicCmd() *cobra.Command {
 	}
 	get := &cobra.Command{Use: "get REF", Short: "Show an epic and the stories linked to it", Args: cobra.ExactArgs(1)}
 	get.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := validRef(args[0]); err != nil {
+			return err
+		}
 		service, err := a.service(cmd)
 		if err != nil {
 			return err

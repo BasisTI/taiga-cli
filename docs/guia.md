@@ -68,7 +68,7 @@ Comandos só de leitura:
 
 ```sh
 taiga project list --output text        # projetos de que a conta é membro; não precisa de projeto selecionado
-taiga project get --output text         # o projeto selecionado e de onde ele veio (source)
+taiga project get --output text         # o projeto selecionado e de onde ele veio (source: flag, env, .taiga.toml, config, ou argument)
 taiga user list --search silva          # só membros do projeto, com is_admin e role_name
 taiga milestone list --closed=false
 taiga epic list --closed=false
@@ -78,11 +78,11 @@ taiga epic get 12 --output text         # descrição e stories vinculadas, na o
 - `--search` procura o texto nos nomes sem diferenciar maiúsculas, mas **sem** ignorar acento: `agil` não acha `Ágil`.
 - `epic get` lista em `user_stories` as stories vinculadas, inclusive de outro projeto (com `project_slug`); uma story que a conta não pode ler aparece só com o `id`.
 - Com o módulo de épicos desligado no projeto, `epic list` e `epic get` respondem `not_found` ("the epics module is disabled in this project"), embora a API do Taiga continue servindo os épicos.
-- Links assinados de mídia (logo do projeto, foto de usuário) saem com o valor do `token=` escondido.
+- Links assinados de mídia (logo do projeto, foto de usuário) saem com o valor do `token=` escondido, e as credenciais do projeto (`*_csv_uuid`, que abre a exportação CSV sem autenticação, e `transfer_token`) nunca saem.
 
 ## Diagnóstico do projeto
 
-`taiga auth status --diagnose` termina com o check `project`: lê o projeto selecionado (só leitura) e mostra `id`, `slug`, a origem da seleção, se a conta é membro e admin, as permissões que faltam entre as que os comandos usam (`view_us`, `modify_us`, `add_us`, `comment_us`, `view_tasks`, `add_task`, `modify_task`, `modify_epic`, `admin_project_values`), os módulos de épicos, kanban e backlog e o número de swimlanes. Fica `skipped` sem projeto selecionado ou quando a identidade (`users/me`) falhou, e `failed` quando o projeto não existe ou a conta não o vê. Permissão faltando não reprova o check; só avisa: sem `modify_epic`, vincular épico vai dar `forbidden`; sem `admin_project_values`, `project apply` também.
+`taiga auth status --diagnose` termina com o check `project`: lê o projeto selecionado (só leitura) e mostra `id`, `slug`, a origem da seleção, se a conta é membro e admin, as permissões que faltam entre as que os comandos usam (`view_us`, `modify_us`, `add_us`, `comment_us`, `view_tasks`, `add_task`, `modify_task`, `modify_epic`, `admin_project_values`), os módulos de épicos, kanban e backlog e o número de swimlanes. Fica `skipped` sem projeto selecionado ou quando a identidade (`users/me`) falhou, e `failed` quando o projeto não pode ser lido: não existe, a conta não o vê, ou outro erro (rede, servidor) interrompeu a leitura. Permissão faltando não reprova o check; só avisa: sem `modify_epic`, vincular épico vai dar `forbidden`; sem `admin_project_values`, `project apply` também.
 
 ## Anexos
 
