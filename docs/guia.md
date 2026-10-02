@@ -78,7 +78,7 @@ taiga epic get 12 --output text         # descrição e stories vinculadas, na o
 - `--search` procura o texto nos nomes sem diferenciar maiúsculas, mas **sem** ignorar acento: `agil` não acha `Ágil`.
 - `epic get` lista em `user_stories` as stories vinculadas, inclusive de outro projeto (com `project_slug`); uma story que a conta não pode ler aparece só com o `id`.
 - Com o módulo de épicos desligado no projeto, `epic list` e `epic get` respondem `not_found` ("the epics module is disabled in this project"), embora a API do Taiga continue servindo os épicos.
-- Links assinados de mídia (logo do projeto, foto de usuário) saem com o valor do token escondido, em qualquer texto, tags inclusive, e também quando a chave vem codificada (`%74oken=`, `t&#111;ken=`, `access_token=`), e as credenciais do projeto (`*_csv_uuid`, que abre a exportação CSV sem autenticação, e `transfer_token`) nunca saem.
+- Links assinados de mídia (logo do projeto, foto de usuário) saem com o valor do token escondido, em qualquer texto, tags inclusive, e também quando a chave vem codificada (`%74oken=`, `t&#111;ken=`, `t&amp;#111;ken=`, `access_token=`) ou dentro do valor de outro parâmetro (`link=https://h/a?token=…`). Se o token só aparece depois de decodificar o texto e não dá para recortar o valor, o texto inteiro vira `[redacted: the text carries a credential]`; e as credenciais do projeto (`*_csv_uuid`, que abre a exportação CSV sem autenticação, e `transfer_token`) nunca saem.
 
 ## Diagnóstico do projeto
 

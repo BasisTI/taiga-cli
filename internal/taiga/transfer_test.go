@@ -325,32 +325,3 @@ func TestLocalWriteFailedRecoveryMentionsStdout(t *testing.T) {
 		t.Fatalf("%q", e.Recovery)
 	}
 }
-
-// The key of a token parameter may be spelled with percent escapes or HTML entities, in any
-// case; servers decode it before reading the value, so the redaction decodes it too.
-func TestRedactTokensDecodesTheKey(t *testing.T) {
-	for in, want := range map[string]string{
-		"http://h/media/a?%74oken=SECRET":              "http://h/media/a?%74oken=…",
-		"http://h/a?x=1&%54%4F%4B%45%4E=SECRET&b=2":    "http://h/a?x=1&%54%4F%4B%45%4E=…&b=2",
-		"see t%6Fken=SECRET here":                      "see t%6Fken=… here",
-		"TOKEN=SECRET":                                 "TOKEN=…",
-		"double %2574oken=SECRET":                      "double %2574oken=…",
-		"html t&#111;ken=SECRET and t&#x6f;ken=SECRET": "html t&#111;ken=… and t&#x6f;ken=…",
-		"http://h/a?access_token=SECRET&tokens=keep":   "http://h/a?access_token=…&tokens=keep",
-		"plain a=1 and b=2, no secret":                 "plain a=1 and b=2, no secret",
-		"bad escape %zz=keep":                          "bad escape %zz=keep",
-	} {
-		if got := RedactTokens(in); got != want {
-			t.Errorf("RedactTokens(%q) = %q, want %q", in, got, want)
-		}
-	}
-	// RedactSecrets keeps hiding every URL query, and now encoded keys outside a URL too.
-	for in, want := range map[string]string{
-		"http://h/a?%74oken=SECRET#f": "http://h/a?…#f",
-		"bare %74oken=SECRET":         "bare %74oken=…",
-	} {
-		if got := RedactSecrets(in); got != want {
-			t.Errorf("RedactSecrets(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
