@@ -45,12 +45,13 @@ Testes em `internal/taiga/stories_probe_integration_test.go`:
 | `milestone`, `swimlane`, `status`, `tags` no POST e no PATCH | gravados; `null` limpa milestone/swimlane; PATCH exige `version` |
 | milestone, swimlane ou status de outro projeto | 403 `PermissionDenied` ("You don't have permissions to set this ... to this user story") |
 | `epics` no PATCH | **ignorado em silêncio**: responde 200, `version` sobe, `epics` continua igual |
-| vínculo de épico | `POST epics/<id>/related_userstories {"epic", "user_story"}` → 201, **sem `version`** e sem alterar a `version` da story; uma story aceita vários épicos *(manual)*; trocar ou remover o vínculo exige `DELETE` (`PATCH` no vínculo respondeu 500 *(manual)*) |
+| vínculo de épico | `POST epics/<id>/related_userstories {"epic", "user_story"}` → 201, **sem `version`** e sem alterar a `version` da story; uma story aceita vários épicos; trocar ou remover o vínculo exige `DELETE` (`PATCH` no vínculo respondeu 500 *(manual)*). Contrato completo em "Fase 3 — vínculo de épico (US #253, PR 253-2)" |
 | POST de story com `version` | aceito e gravado (a story nasce com a versão enviada); sem `version` nasce com 1. A CLI não envia `version` na criação |
 | tags | o servidor grava em minúsculas; sem duplicatas (`["Dup","dup"]` → `[["dup",null]]`) *(manual)* |
 
-Consequência: `--epic` em `story create`/`story update` fica bloqueado com `unsupported_operation`
-(exit 2) até decisão humana, conforme o gate do plano (vínculo sem OCC e substituição por `DELETE`).
+Consequência na fase 2: `--epic` em `story create`/`story update` ficou bloqueado com `unsupported_operation`
+(exit 2) até decisão humana (vínculo sem OCC e substituição por `DELETE`). A decisão veio em 2026-10-01 e o vínculo
+entrou no PR 253-2 (seção "Fase 3 — vínculo de épico").
 `--milestone` e `--swimlane` são campos da story e usam a `version` normal.
 
 ### Filtros da listagem `GET userstories?project=<id>`
@@ -654,3 +655,38 @@ arquivo **sem autenticação**: confirmado em produção pelo Cedric em 2026-10-
 Taiga local, onde o seed não tem foto e o teste `TestIntegrationStoryOutputsHideUserPhotos` põe um avatar no `svc`
 (`POST users/change_avatar`, multipart `avatar`) e o tira no fim (`POST users/remove_avatar`). Toda saída curada passa
 por `app.Scrub`: as chaves e a URL ficam, o valor do token vira `…`.
+
+## Fase 3 — vínculo de épico (US #253, PR 253-2)
+
+Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 2026-10-02, com `admin` e `svc` (membro
+convidado por e-mail) em projetos descartáveis (`cli-test-probe-epic-links-<sufixo>` e `-other-`). Teste em
+`internal/taiga/epic_links_probe_integration_test.go`: `go test -tags integration -run '^TestProbeEpicLinkContract$'
+-v ./internal/taiga`.
+
+| Requisição | Resultado |
+|---|---|
+| `POST epics/<id>/related_userstories {"epic", "user_story"}` | 201 `{"epic", "user_story", "order"}`; a `version` da story **não muda**; `GET userstories/<id>` já traz o épico em `epics` |
+| o mesmo `POST` de novo | **400** `{"__all__": ["Related user story with this User story and Epic already exists."]}`; nada muda |
+| segundo épico na mesma story | 201; `epics` com os dois |
+| `epic` do corpo diferente do `<id>` do caminho | vale o **corpo**: `POST epics/<E3>/related_userstories {"epic": E2}` respondeu o 400 de duplicata de E2 |
+| `DELETE epics/<id>/related_userstories/<story id>` | 204 sem corpo; `epics` relido já sem o épico; `version` da story igual |
+| o mesmo `DELETE` de novo | **404** `{"_error_message": ""}` |
+| `GET epics/<id>/related_userstories/<story id>` | 200 com o vínculo (o mesmo formato do `POST`) |
+| épico de **outro projeto** | **201**: o servidor vincula (como `admin`) e a story passa a listar o épico estrangeiro |
+| `svc` com o papel padrão de membro | tem `modify_epic`; `POST` 201 |
+| `svc` sem `modify_epic` no papel | `POST` e `DELETE` → **403** `PermissionDenied` |
+
+Consequências na CLI:
+
+- O vínculo não tem `version` nem altera a da story. A conferência é da CLI: os `epics` da story são relidos antes do
+  `POST` e qualquer mudança desde a primeira leitura é `version_conflict` (nada enviado); depois da escrita, a
+  pós-condição relê a story.
+- O 400 de duplicata e o 404 do `DELETE` repetido são o que torna o rerun seguro: rodar o mesmo comando de novo não
+  cria duplicata e não falha por um vínculo já removido. Mesmo assim, o 400 só conta como sucesso depois da releitura
+  mostrar o vínculo, porque outro 400 (corpo inválido) tem o mesmo status.
+- O `epic` do corpo é sempre o mesmo id do caminho.
+- O servidor não confere o projeto do épico; a CLI resolve o épico só no projeto selecionado (`epics/by_ref` pelo
+  catálogo do projeto), então `epic link` nunca vincula um épico de outro projeto. Na troca, um épico de outro projeto
+  já vinculado à story conta como antigo e é removido.
+- Sem `modify_epic`, `epic link` sai com `forbidden` (exit 6); o check `project` do `auth status --diagnose` já lista
+  a permissão ausente.
