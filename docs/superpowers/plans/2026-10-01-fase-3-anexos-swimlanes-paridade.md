@@ -583,6 +583,7 @@ Não detalhado aqui; plano próprio depois da fase 3. Escopo decidido (2026-10-0
 | 2026-10-01 | Limpeza de checkbox/date (`--unset`) | Cedric; entregue na #260 |
 | 2026-10-01 | **Épico: criar e trocar.** `--epic` acrescenta; a troca exige `--replace-epic`/`--replace` + `--confirm-delete` e faz `POST` do novo **antes** do `DELETE` dos antigos. É a única exceção à regra "nenhum DELETE em comando curado" | Cedric, nesta conversa de planejamento (encaminhada pelo Assistente Global) |
 | 2026-10-01 | **Anexos:** story e task; `list`, `upload`, `download`; sem limite de tamanho na CLI (`413` → `payload_too_large`) | Cedric, nesta conversa |
+| 2026-10-02 | **Limite de upload do nginx da Basis:** `client_max_body_size 50M`. A CLI não impõe limite próprio; o `413` vira `payload_too_large` | Cedric, via Assistente Global (pacote da #251) |
 | 2026-10-01 | **Swimlanes:** só listar e usar; sem criar, renomear nem reordenar | Cedric, nesta conversa |
 | 2026-10-01 | **Diagnóstico:** check `project` no `auth status --diagnose`, sem comando novo | Cedric, nesta conversa |
 | 2026-10-01 | **PRs:** ordem #252 → #251 → #253; a #253 em três PRs (`TG-253-leitura`, `TG-253-epicos`, `TG-253-tasks`) | Cedric, nesta conversa |
@@ -601,7 +602,6 @@ Não detalhado aqui; plano próprio depois da fase 3. Escopo decidido (2026-10-0
 ### Gates e pendências
 
 - **Download no Taiga local (Task 3, Step 3):** o compose de teste não roteia `/media/`. Pode ser preciso um gateway nginx no profile `full`, o que muda o `compose.test.yml` usado também por outro agente: **combinar com o Cedric antes**. Sem isso, o teste de integração do download fica pulado e o download é validado só pela unidade e por um smoke manual de leitura no Taiga da Basis.
-- **Limite de upload do nginx da Basis** (`client_max_body_size`): desconhecido. Só se descobre com um upload real ou perguntando a quem administra o proxy; a CLI só traduz o `413`.
 - **OCC de `assigned_to` em task (Task 11):** decide se a task precisa da releitura e pós-condição da #247.
 - **Texto da integração GitLab para task:** sem evidência; se aparecer outro modelo, entra em `SystemComment`.
 - **`modify_epic` da conta de serviço na Basis:** se faltar, `epic link` dá `forbidden` (exit 6); o check `project` do diagnóstico mostra isso antes.
