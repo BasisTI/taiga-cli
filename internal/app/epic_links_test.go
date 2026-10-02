@@ -28,6 +28,8 @@ type linkAPI struct {
 	onRead   func(f *linkAPI, n int)
 	created  bool
 	storyRef int64
+	// readsBeforeRemove is the story read on which a test's onRead acts.
+	readsBeforeRemove int
 }
 
 var epicRefs = map[int64]int64{11: 1, 12: 2, 13: 3}
@@ -434,7 +436,7 @@ func TestStoryUpdateLinkFailureSaysFieldsSaved(t *testing.T) {
 	s.API = api
 	_, err := s.UpdateStoryWithEpic(context.Background(), "246", Patch{Set: Object{"subject": "new"}}, epicRef(t, s, "1"), false, false, false)
 	e := output.AsError(err)
-	if !patched || e.Code != "forbidden" || !strings.Contains(e.Cause, "were saved") || !strings.Contains(e.Recovery, "taiga epic link 1 246") ||
+	if !patched || e.Code != "story_updated_link_failed" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Cause, "were saved") || !strings.Contains(e.Cause, "forbidden") || !strings.Contains(e.Recovery, "taiga epic link 1 246") ||
 		!strings.Contains(e.Recovery, "do not run the update command again") {
 		t.Fatalf("patched %v err %v recovery %q", patched, err, e.Recovery)
 	}
@@ -485,5 +487,102 @@ func TestLinkEpicPostconditionFails(t *testing.T) {
 	_, err = s2.LinkEpic(context.Background(), linkStory(t, s2), epicRef(t, s2, "2"), true, false)
 	if codeOf(err) != "epic_links_postcondition_failed" {
 		t.Fatalf("err: %v", err)
+	}
+}
+
+func TestReplaceEpicStopsWhenNewLinkVanishes(t *testing.T) {
+	for name, links := range map[string][]int64{"with POST": {11}, "rerun": {11, 12}} {
+		t.Run(name, func(t *testing.T) {
+			f, s := newLinkAPI(t, links...)
+			st := linkStory(t, s)
+			// The read in removeOld comes after the pre-check (and the POST): someone unlinks #2 in between.
+			f.onRead = func(f *linkAPI, n int) {
+				if n == f.readsBeforeRemove {
+					delete(f.links, 12)
+				}
+			}
+			f.readsBeforeRemove = f.reads + 2
+			_, err := s.LinkEpic(context.Background(), st, epicRef(t, s, "2"), true, false)
+			if codeOf(err) != "epic_links_postcondition_failed" || strings.Contains(f.writes(), "DELETE") {
+				t.Fatalf("err %v, writes %s", err, f.writes())
+			}
+			if c := output.AsError(err).Cause; strings.Contains(c, "is saved") || !strings.Contains(c, "not among") {
+				t.Fatalf("cause: %s", c)
+			}
+		})
+	}
+}
+
+func TestStoryUpdateLinkNetworkFailureAfterPatchIsNotExit7(t *testing.T) {
+	for name, setup := range map[string]func(f *linkAPI){
+		"post not sent": func(f *linkAPI) {
+			f.post = func(*linkAPI, int64) (*taiga.Response, error) {
+				return nil, &taiga.NetworkError{Method: "POST", Path: linkPath(11), Err: &net.OpError{Op: "dial", Err: errors.New("refused")}}
+			}
+		},
+		"pre-read fails": func(f *linkAPI) {
+			f.readErr = func(n int) error {
+				if n == 3 { // 1: the update's read; 2: the re-read after the PATCH; 3: the re-read before the POST
+					return &taiga.APIError{Status: 502, Method: "GET", Path: "userstories/6808"}
+				}
+				return nil
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, s := newLinkAPI(t)
+			patched := false
+			setup(f)
+			s.API = &patchingAPI{linkAPI: f, patched: &patched}
+			_, err := s.UpdateStoryWithEpic(context.Background(), "246", Patch{Set: Object{"subject": "new"}}, epicRef(t, s, "1"), false, false, false)
+			if !patched || codeOf(err) != "story_updated_link_failed" || exitOf(err) != output.ExitUnexpected {
+				t.Fatalf("patched %v err %v exit %d", patched, err, exitOf(err))
+			}
+		})
+	}
+}
+
+func TestStoryUpdateLinkConflictAfterPatchIsNotRetryable(t *testing.T) {
+	f, s := newLinkAPI(t)
+	patched := false
+	f.readErr = func(n int) error {
+		if n == 3 {
+			f.links[13] = true // linked by someone else after the PATCH
+		}
+		return nil
+	}
+	s.API = &patchingAPI{linkAPI: f, patched: &patched}
+	_, err := s.UpdateStoryWithEpic(context.Background(), "246", Patch{Set: Object{"subject": "new"}}, epicRef(t, s, "1"), false, false, false)
+	if !patched || codeOf(err) != "story_updated_link_failed" || exitOf(err) != output.ExitUnexpected || !strings.Contains(err.Error(), "version_conflict") {
+		t.Fatalf("patched %v err %v exit %d", patched, err, exitOf(err))
+	}
+}
+
+func TestStoryUpdateNoopLinkUsesThePatchResult(t *testing.T) {
+	f, s := newLinkAPI(t, 11)
+	patched := false
+	f.readErr = func(n int) error {
+		if n >= 3 {
+			return &taiga.NetworkError{Method: "GET", Path: "userstories/6808", Err: errors.New("i/o timeout")}
+		}
+		return nil
+	}
+	s.API = &patchingAPI{linkAPI: f, patched: &patched}
+	got, err := s.UpdateStoryWithEpic(context.Background(), "246", Patch{Set: Object{"subject": "new"}}, epicRef(t, s, "1"), false, false, false)
+	if err != nil || !patched || ID(got.(Object)["id"]) != 6808 {
+		t.Fatalf("patched %v got %v err %v", patched, got, err)
+	}
+}
+
+func TestReplaceEpicDeleteRefusedDoesNotPromiseConvergence(t *testing.T) {
+	f, s := newLinkAPI(t, 11)
+	f.del = func(*linkAPI, int64) (*taiga.Response, error) {
+		return nil, &taiga.APIError{Status: 403, Method: "DELETE", Path: unlinkPath(11, 6808), Body: []byte(`{"_error_message": "You do not have permission to perform this action."}`)}
+	}
+	_, err := s.LinkEpic(context.Background(), linkStory(t, s), epicRef(t, s, "2"), true, false)
+	e := output.AsError(err)
+	if e.Code != "epic_replace_incomplete" || strings.Contains(e.Recovery, "run the same command again") || !strings.Contains(e.Recovery, "permission") ||
+		strings.Contains(e.Cause, "may or may not") {
+		t.Fatalf("err %v recovery %q", err, e.Recovery)
 	}
 }

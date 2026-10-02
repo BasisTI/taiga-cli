@@ -199,7 +199,7 @@ func TestStoryUpdateEpicLinkFailureAfterPatch(t *testing.T) {
 	f, _ := newStoryFake(t)
 	f.fail["POST epics/9/related_userstories"] = 403
 	_, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--append-description", "x", "--epic", "91")
-	if code != 6 || !strings.Contains(stderr, "forbidden") || !strings.Contains(stderr, "were saved") ||
+	if code != 1 || !strings.Contains(stderr, "story_updated_link_failed") || !strings.Contains(stderr, "[forbidden]") || !strings.Contains(stderr, "were saved") ||
 		!strings.Contains(stderr, "taiga epic link 91 246") || !strings.Contains(stderr, "do not run the update command again") {
 		t.Fatalf("%d %s", code, stderr)
 	}

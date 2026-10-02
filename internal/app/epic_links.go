@@ -209,7 +209,10 @@ func (s *Service) removeOld(ctx context.Context, story, epic Object, before, old
 	storyID, epicID := ID(story["id"]), ID(epic["id"])
 	now, err := s.storyEpicsNow(ctx, storyID)
 	if err != nil {
-		return nil, replaceIncomplete(story, epic, nil, old, "the story could not be read before removing the old epics: "+output.AsError(err).Error(), "")
+		return nil, replaceIncomplete(story, epic, nil, old, "the story could not be read before removing the old epics: "+output.AsError(err).Error(), fmt.Sprintf("GET userstories/%d", storyID), false)
+	}
+	if !hasLink(now, epicID) {
+		return nil, linksMismatch(story, epic, true, now, fmt.Sprintf("epic #%v is no longer linked; no old link was removed", epic["ref"]))
 	}
 	for _, l := range now {
 		if l.id != epicID && !hasLink(before, l.id) {
@@ -227,18 +230,25 @@ func (s *Service) removeOld(ctx context.Context, story, epic Object, before, old
 		var ae *taiga.APIError
 		gone := errors.As(err, &ae) && ae.Status == 404 // removed by an earlier run or by someone else
 		if err != nil && !gone {
-			return nil, replaceIncomplete(story, epic, removed, old[i:], fmt.Sprintf("DELETE %s failed: %s", path, output.AsError(taiga.ToOutput(err)).Error()), "DELETE "+path)
+			// A 4xx refusal (403 without modify_epic) removed nothing and will refuse a rerun too.
+			refused := ae != nil && ae.Status >= 400 && ae.Status < 500
+			return nil, replaceIncomplete(story, epic, removed, old[i:], fmt.Sprintf("DELETE %s failed: %s", path, output.AsError(taiga.ToOutput(err)).Error()), "DELETE "+path, refused)
 		}
 		removed = append(removed, l)
 	}
 	return removed, nil
 }
 
-func replaceIncomplete(story, epic Object, removed, remaining []storyLink, why, stage string) error {
+func replaceIncomplete(story, epic Object, removed, remaining []storyLink, why, stage string, refused bool) error {
+	note, recovery := " (the first one may or may not be removed)", "run the same command again: it re-reads the story and finishes the replacement"
+	if refused {
+		note = ""
+		recovery = "Taiga refused to remove a link, so running the command again will not finish it: check the modify_epic permission with `taiga auth status --diagnose` (an epic of another project needs it there), or remove the remaining links in the web UI; the new link is saved"
+	}
 	return &output.Error{Code: "epic_replace_incomplete", Source: "api", Stage: stage,
-		Cause: fmt.Sprintf("story #%v: linked to epic #%v; removed [%s]; remaining [%s] (the last one may or may not be removed): %s",
-			story["ref"], epic["ref"], strings.Join(linkLabels(removed), ", "), strings.Join(linkLabels(remaining), ", "), why),
-		Recovery: "run the same command again: it re-reads the story and finishes the replacement", Exit: output.ExitUnexpected}
+		Cause: fmt.Sprintf("story #%v: linked to epic #%v; removed [%s]; remaining [%s]%s: %s",
+			story["ref"], epic["ref"], strings.Join(linkLabels(removed), ", "), strings.Join(linkLabels(remaining), ", "), note, why),
+		Recovery: recovery, Exit: output.ExitUnexpected}
 }
 
 func linksMismatch(story, epic Object, replace bool, found []storyLink, why string) error {
@@ -246,8 +256,12 @@ func linksMismatch(story, epic Object, replace bool, found []storyLink, why stri
 	if replace {
 		want = fmt.Sprintf("only epic #%v", epic["ref"])
 	}
+	state := fmt.Sprintf("the link to epic #%v is saved", epic["ref"])
+	if !hasLink(found, ID(epic["id"])) {
+		state = fmt.Sprintf("epic #%v is not among them", epic["ref"])
+	}
 	return &output.Error{Code: "epic_links_postcondition_failed", Source: "api", Stage: fmt.Sprintf("GET userstories/%v", story["id"]),
-		Cause:    fmt.Sprintf("story #%v should have %s, found [%s]: %s; the link to epic #%v is saved", story["ref"], want, strings.Join(linkLabels(found), ", "), why, epic["ref"]),
+		Cause:    fmt.Sprintf("story #%v should have %s, found [%s]: %s; %s", story["ref"], want, strings.Join(linkLabels(found), ", "), why, state),
 		Recovery: "do not re-run the command blindly: someone else changed the story's epics at the same time; check with `taiga story get` and fix what is needed",
 		Exit:     output.ExitConflict}
 }
@@ -270,14 +284,13 @@ func (s *Service) linkResult(story, epic Object, changed, linked bool, removed, 
 		"removed": linkLabels(removed), "epics": linkLabels(final)}
 }
 
-// afterWrite turns an error of the link that follows a story write into one that says the
-// story write is saved and never invites running the same command again.
+// afterWrite turns an error of the link that follows a story write into code (exit 1): the
+// story write is saved, so neither the code nor the exit may read as "safe to repeat" (exit 7,
+// version_conflict, epic_link_unconfirmed). The link's own code stays in the cause.
 func afterWrite(err error, code, saved, recovery string) error {
 	e := *output.AsError(err)
-	if code != "" {
-		e.Code, e.Exit = code, output.ExitUnexpected
-	}
-	e.Cause = saved + "; " + e.Cause
+	e.Cause = fmt.Sprintf("%s [%s]; %s", saved, e.Code, e.Cause)
+	e.Code, e.Exit = code, output.ExitUnexpected
 	e.Recovery = recovery
 	return &e
 }
@@ -332,8 +345,9 @@ func (s *Service) UpdateStoryWithEpic(ctx context.Context, ref string, p Patch, 
 		}
 		return plan, nil
 	}
+	var written any
 	if len(patch) > 0 {
-		if _, err := s.updateFrom(ctx, before, p, false, force); err != nil {
+		if written, err = s.updateFrom(ctx, before, p, false, force); err != nil {
 			return nil, err
 		}
 	}
@@ -346,14 +360,16 @@ func (s *Service) UpdateStoryWithEpic(ctx context.Context, ref string, p Patch, 
 		if replace {
 			flag = " --replace --confirm-delete"
 		}
-		return nil, afterWrite(err, "", fmt.Sprintf("the other changes to story #%v were saved, but the epic link failed", before["ref"]),
+		return nil, afterWrite(err, "story_updated_link_failed", fmt.Sprintf("the other changes to story #%v were saved, but the epic link failed", before["ref"]),
 			fmt.Sprintf("do not run the update command again (it would repeat the other changes); finish the link with `taiga epic link %v %v%s`",
 				epic["ref"], before["ref"], flag))
 	}
 	if after == nil {
-		if after, err = Read(ctx, s.API, fmt.Sprintf("userstories/%d", ID(before["id"])), nil); err != nil {
-			return nil, err
+		// The link was already there: the story is the PATCH result, or the read before it.
+		if view, ok := written.(Object); ok {
+			return view, nil
 		}
+		return s.StoryView(before)
 	}
 	return s.StoryView(after)
 }
