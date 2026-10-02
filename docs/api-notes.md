@@ -528,7 +528,7 @@ Campos `project`, `object_id`, `description` e o arquivo em `attached_file`.
 | sucesso | 201 com `id`, `name`, `size`, `sha1`, `url`, `object_id`, `project`, `order` (0), `is_deprecated` (false), `from_comment` (false), `description`, `created_date`, `owner`; **sem `version`**. `size` e `sha1` batem com os calculados localmente |
 | nome com acento, espaço ou aspas (`relatório final.txt`, `with "quotes".txt`) | `name` guardado como enviado; só o caminho do `url` é normalizado (`relatorio-final.txt`, `with-quotes.txt`) |
 | nome com diretório (`../x`, `dir/sub/inner.txt`) | `name` vira o basename (`x`, `inner.txt`) |
-| nome com CR/LF, barra invertida ou entidade HTML | gravado **diferente** do enviado: o Go codifica CR/LF (`%0D%0A`), o Django guarda só o que vem depois da `\` e faz unescape de entidades (`a&amp;b` → `a&b`). Como a idempotência compara nome e `sha1`, a CLI recusa esses nomes (`usage`, renomear o arquivo) |
+| nome com CR/LF, barra invertida ou entidade HTML | gravado **diferente** do enviado: o Go codifica CR/LF (`%0D%0A`), o Django guarda só o que vem depois da `\` e aplica o `html.unescape` do Python, que aceita entidades **sem `;`** (`report&amp.txt` → `report&.txt`, `report&#65.txt` e `report&#x41.txt` → `reportA.txt`; revisão independente da PR #12). Como a idempotência compara nome e `sha1`, a CLI recusa esses nomes (`usage`, renomear o arquivo) |
 | arquivo vazio (0 byte) | **400** `{"attached_file": ["The submitted file is empty."]}` |
 | `object_id` de story de outro projeto, com `project` deste | 400 `Project ID does not match between object and project` (`WrongArguments`) |
 | `object_id` inexistente | 400 `Object id issue doesn't exist` |

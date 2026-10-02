@@ -265,3 +265,61 @@ func TestAttachmentDownloadInterruptedLeavesNoTemp(t *testing.T) {
 		t.Fatalf("leftovers: %v", entries)
 	}
 }
+
+// A signed URL never reaches the output: not echoed by an error page of the media server, not
+// in a --dry-run plan (round 1 of the PR #12 review).
+func TestAttachmentSignedURLNeverPrinted(t *testing.T) {
+	for _, mode := range []string{"json", "text"} {
+		t.Run("download error "+mode, func(t *testing.T) {
+			f, _ := newAttachmentFake(t)
+			a := f.add("userstories/attachments", 6808, "a.txt", "bytes")
+			srv, _ := fakeTaiga(t, func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, "/media/") {
+					w.WriteHeader(403)
+					_, _ = fmt.Fprint(w, "denied URL: "+r.URL.String()+" (signature "+r.URL.Query().Get("token")+")")
+					return
+				}
+				f.handle(w, r)
+			})
+			f.srv = srv.URL
+			a["url"] = srv.URL + "/media/a?token=SIGNED_SENTINEL"
+			out, stderr, code := runIn(t, f.env(), "", "attachment", "download", "246", fmt.Sprint(a["id"]), "--to", "-", "--output", mode)
+			if code != 6 || strings.Contains(out+stderr, "SIGNED_SENTINEL") || !strings.Contains(stderr, "denied URL") {
+				t.Fatalf("%d %s %s", code, out, stderr)
+			}
+		})
+		t.Run("dry-run "+mode, func(t *testing.T) {
+			f, _ := newAttachmentFake(t)
+			file := filepath.Join(t.TempDir(), "a.txt")
+			if err := os.WriteFile(file, []byte("bytes"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out, stderr, code := runIn(t, f.env(), "", "attachment", "upload", "246", file, "--dry-run", "--description", "see "+f.srv+"/media/a?token=SIGNED_SENTINEL", "--output", mode)
+			if code != 0 || f.posts != 0 || strings.Contains(out+stderr, "SIGNED_SENTINEL") || !strings.Contains(out, "/media/a?") {
+				t.Fatalf("%d %s %s", code, out, stderr)
+			}
+		})
+	}
+}
+
+// The saved file gets the user's umask, like any file the user creates.
+func TestAttachmentDownloadRespectsUmask(t *testing.T) {
+	f, _ := newAttachmentFake(t)
+	a := f.add("userstories/attachments", 6808, "a.txt", "bytes")
+	old := syscall.Umask(0o077)
+	defer syscall.Umask(old)
+	dest := filepath.Join(t.TempDir(), "a.txt")
+	if _, stderr, code := runIn(t, f.env(), "", "attachment", "download", "246", fmt.Sprint(a["id"]), "--to", dest); code != 0 {
+		t.Fatalf("%d %s", code, stderr)
+	}
+	syscall.Umask(0o022)
+	dest2 := filepath.Join(t.TempDir(), "a.txt")
+	if _, stderr, code := runIn(t, f.env(), "", "attachment", "download", "246", fmt.Sprint(a["id"]), "--to", dest2); code != 0 {
+		t.Fatalf("%d %s", code, stderr)
+	}
+	i1, _ := os.Stat(dest)
+	i2, _ := os.Stat(dest2)
+	if i1.Mode().Perm() != 0o600 || i2.Mode().Perm() != 0o644 {
+		t.Fatalf("modes %04o %04o", i1.Mode().Perm(), i2.Mode().Perm())
+	}
+}

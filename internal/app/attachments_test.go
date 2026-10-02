@@ -389,7 +389,7 @@ func TestDownloadWritesTheCheckedFile(t *testing.T) {
 	dest := filepath.Join(dir, "report.txt")
 	b, rerr := os.ReadFile(dest)
 	info, _ := os.Stat(dest)
-	if rerr != nil || string(b) != "content" || got["path"] != dest || got["url"] != nil || info.Mode().Perm() != 0o644 {
+	if rerr != nil || string(b) != "content" || got["path"] != dest || got["url"] != nil || info.Mode().Perm() != 0o666&^currentUmask() {
 		t.Fatalf("%v %q %v", got, b, rerr)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
@@ -518,7 +518,7 @@ func TestAttachmentViewDropsEverySignedURL(t *testing.T) {
 func TestUploadRefusesNamesTaigaRewrites(t *testing.T) {
 	f, s := newAttachAPI(t)
 	f.upload = accept
-	for _, name := range []string{"nl\r\nX.txt", `back\slash.txt`, "a&amp;b.txt", "a&#34;b.txt", "tab\tname.txt"} {
+	for _, name := range []string{"nl\r\nX.txt", `back\slash.txt`, "a&amp;b.txt", "a&#34;b.txt", "tab\tname.txt", "report&amp.txt", "report&#65.txt", "report&#x41.txt", "x&copy.txt"} {
 		_, err := s.Upload(context.Background(), "story", story(t, s), writeFile(t, name, "x"), "", false)
 		if codeOf(err) != "usage" {
 			t.Fatalf("%q: %v", name, err)
@@ -548,5 +548,18 @@ func TestUploadLostAnswerAfterDeadlineIsChecked(t *testing.T) {
 	got, err := s.Upload(ctx, "story", owner, writeFile(t, "r.txt", "content"), "", false)
 	if err != nil || got.(Object)["created"] != true {
 		t.Fatalf("%v %v", got, err)
+	}
+}
+
+// The answer must carry the name sent: a name Taiga rewrote breaks the idempotence.
+func TestUploadPostconditionChecksName(t *testing.T) {
+	f, s := newAttachAPI(t)
+	f.upload = func(a *attachAPI, path string, fields map[string]string, name string, content []byte) (*taiga.Response, error) {
+		return accept(a, path, fields, "renamed.txt", content)
+	}
+	_, err := s.Upload(context.Background(), "story", story(t, s), writeFile(t, "r.txt", "content"), "", false)
+	var e *output.Error
+	if !errors.As(err, &e) || e.Code != "attachment_postcondition_failed" || !strings.Contains(e.Cause, "renamed.txt") {
+		t.Fatalf("%v", err)
 	}
 }

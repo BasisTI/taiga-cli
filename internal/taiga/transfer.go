@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -148,16 +149,22 @@ func (c *Client) Download(ctx context.Context, rawURL string, w io.Writer) (int6
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			_ = resp.Body.Close()
-			lastErr = &APIError{Status: resp.StatusCode, Method: http.MethodGet, Path: path, Body: body}
+			// An error page may echo the request: the token must not reach the error output.
+			lastErr = &APIError{Status: resp.StatusCode, Method: http.MethodGet, Path: path, Body: []byte(redactURLSecrets(string(body), u))}
 			if resp.StatusCode >= 500 {
 				continue
 			}
 			return 0, lastErr
 		}
-		n, err := io.Copy(w, resp.Body)
+		dst := &localWriter{w: w}
+		n, err := io.Copy(dst, resp.Body)
 		_ = resp.Body.Close()
 		if err == nil {
 			return n, nil
+		}
+		if dst.err != nil {
+			// The destination failed (full disk, closed pipe): fetching again would not help.
+			return n, &LocalWriteError{Err: dst.err}
 		}
 		lastErr = &NetworkError{Method: http.MethodGet, Path: path, Err: err}
 		if n > 0 {
@@ -165,6 +172,54 @@ func (c *Client) Download(ctx context.Context, rawURL string, w io.Writer) (int6
 		}
 	}
 	return 0, lastErr
+}
+
+// localWriter records the error of the destination, to tell it from a transport error.
+type localWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (l *localWriter) Write(p []byte) (int, error) {
+	n, err := l.w.Write(p)
+	if err != nil {
+		l.err = err
+	}
+	return n, err
+}
+
+// LocalWriteError is a download whose destination could not be written. Nothing is retried.
+type LocalWriteError struct{ Err error }
+
+func (e *LocalWriteError) Error() string { return "writing the downloaded file: " + e.Err.Error() }
+func (e *LocalWriteError) Unwrap() error { return e.Err }
+
+var (
+	urlQuery   = regexp.MustCompile(`\?[^\s"'<>#]+`)
+	tokenParam = regexp.MustCompile(`(?i)(token=)[^&\s"'<>#]*`)
+)
+
+// RedactSecrets hides the query of every URL in s, and any bare token= value: signed URLs
+// carry their credential there.
+func RedactSecrets(s string) string {
+	s = urlQuery.ReplaceAllString(s, "?…")
+	return tokenParam.ReplaceAllString(s, "${1}…")
+}
+
+// redactURLSecrets is RedactSecrets plus every value of u's query, raw or escaped, wherever it
+// appears in s.
+func redactURLSecrets(s string, u *url.URL) string {
+	for _, vs := range u.Query() {
+		for _, v := range vs {
+			if len(v) < 6 {
+				continue
+			}
+			for _, form := range []string{v, url.QueryEscape(v), url.PathEscape(v)} {
+				s = strings.ReplaceAll(s, form, "…")
+			}
+		}
+	}
+	return RedactSecrets(s)
 }
 
 // sameOrigin compares scheme, host (case-insensitive) and port (with the scheme's default)

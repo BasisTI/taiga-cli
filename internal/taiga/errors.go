@@ -124,6 +124,11 @@ func ToOutput(err error) *output.Error {
 		}
 		return &output.Error{Code: "version_conflict", Source: "api", Stage: ce.Method + " " + stagePath(ce.Path), Cause: cause, Recovery: "re-read the resource and retry; use --force-version to override", Exit: output.ExitConflict}
 	}
+	var lw *LocalWriteError
+	if errors.As(err, &lw) {
+		return &output.Error{Code: "local_write_failed", Source: "file", Cause: lw.Error(),
+			Recovery: "check free space and permissions at the destination (or the reader of stdout); nothing was saved", Exit: output.ExitUnexpected}
+	}
 	var uu *UntrustedURLError
 	if errors.As(err, &uu) {
 		return &output.Error{Code: "attachment_url_untrusted", Source: "api", Stage: "GET " + uu.URL, Cause: uu.Error(),

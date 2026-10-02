@@ -9,8 +9,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -262,5 +264,56 @@ func TestTransferClientHasNoTotalTimeout(t *testing.T) {
 	}
 	if c.http.Timeout != 30 {
 		t.Fatal("the API client was changed")
+	}
+}
+
+// An error page that echoes the request (URL, token) must not carry the token to the output.
+func TestDownloadErrorBodyHidesToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		_, _ = fmt.Fprintf(w, "denied %s; raw %s; escaped %s", r.URL.String(), r.URL.Query().Get("token"), url.QueryEscape(r.URL.Query().Get("token")))
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL, nil).Download(context.Background(), srv.URL+"/media/a?token=SIG%3ANED&x=1", io.Discard)
+	e := ToOutput(err)
+	for _, s := range []string{e.Cause, e.Error(), err.Error()} {
+		if strings.Contains(s, "SIG:NED") || strings.Contains(s, "SIG%3ANED") || strings.Contains(s, "NED") {
+			t.Fatalf("token in %q", s)
+		}
+	}
+	if e.Code != "forbidden" || !strings.Contains(e.Cause, "denied /media/a?") {
+		t.Fatalf("%+v", e)
+	}
+}
+
+type fullWriter struct{}
+
+func (fullWriter) Write([]byte) (int, error) { return 0, syscall.ENOSPC }
+
+// A full disk is a local failure: no new GET, no network_error.
+func TestDownloadLocalWriteErrorIsNotNetwork(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = fmt.Fprint(w, "bytes")
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL, nil, WithRetryWait(0)).Download(context.Background(), srv.URL+"/media/a", fullWriter{})
+	e := ToOutput(err)
+	if hits.Load() != 1 || e.Code != "local_write_failed" || e.Source != "file" || e.Exit != output.ExitUnexpected || !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("hits=%d %+v", hits.Load(), e)
+	}
+}
+
+func TestRedactSecrets(t *testing.T) {
+	for in, want := range map[string]string{
+		"http://h/media/a?token=abc#frag":       "http://h/media/a?…#frag",
+		"see http://h/x?a=1&token=abc and more": "see http://h/x?… and more",
+		"token=abc&other=1":                     "token=…&other=1",
+		"no secrets here?":                      "no secrets here?",
+	} {
+		if got := RedactSecrets(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
 	}
 }

@@ -7,12 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"html"
 	"io"
 	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -130,14 +130,15 @@ func localFile(path string) (UploadFile, error) {
 	return UploadFile{Name: name, Size: n, SHA1: hex.EncodeToString(h.Sum(nil))}, nil
 }
 
-// htmlEntity is what Django's multipart parser unescapes in a file name.
-var htmlEntity = regexp.MustCompile(`&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);`)
-
 // rewritten is a file name Taiga would store differently from what is sent: the multipart
-// encoder escapes CR and LF, Django keeps only what follows a backslash and unescapes HTML
-// entities. The stored name must be the local one, or the idempotence by name and sha1 breaks.
+// encoder escapes CR and LF, and Django keeps only what follows a backslash and applies
+// Python's html.unescape, which also takes entities without ";" (report&amp.txt, &#65). The
+// stored name must be the local one, or the idempotence by name and sha1 breaks. Go's
+// html.UnescapeString follows the same HTML5 rules; any "&#" is refused as well, so a numeric
+// form the two treat differently never gets through.
 func rewritten(name string) bool {
-	return strings.ContainsFunc(name, func(r rune) bool { return unicode.Is(unicode.Cc, r) || r == '\\' }) || htmlEntity.MatchString(name)
+	return strings.ContainsFunc(name, func(r rune) bool { return unicode.Is(unicode.Cc, r) || r == '\\' }) ||
+		html.UnescapeString(name) != name || strings.Contains(name, "&#")
 }
 
 // sameFile is an attachment with the name and content of file.
@@ -171,7 +172,12 @@ func (s *Service) Upload(ctx context.Context, kind string, owner Object, path, d
 	}
 	fields := map[string]string{"project": s.projectID(), "object_id": fmt.Sprint(owner["id"]), "description": description}
 	if dry {
-		return UploadPlan{true, "POST", endpoint, fields, file}, nil
+		// The plan is printed: a signed URL pasted in the description must not reach the output.
+		shown := map[string]string{}
+		for k, v := range fields {
+			shown[k] = taiga.RedactSecrets(v)
+		}
+		return UploadPlan{true, "POST", endpoint, shown, file}, nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -191,10 +197,10 @@ func (s *Service) Upload(ctx context.Context, kind string, owner Object, path, d
 		if derr != nil {
 			return s.findUpload(ctx, endpoint, owner, file, known, &taiga.UnreadableBodyError{Method: "POST", Path: endpoint, Status: resp.Status, Err: derr})
 		}
-		if fmt.Sprint(answer["sha1"]) != file.SHA1 || ID(answer["size"]) != file.Size || ID(answer["object_id"]) != ID(owner["id"]) {
+		if !sameFile(answer, file) || ID(answer["size"]) != file.Size || ID(answer["object_id"]) != ID(owner["id"]) {
 			return nil, &output.Error{Code: "attachment_postcondition_failed", Source: "api", Stage: "POST " + endpoint,
-				Cause: fmt.Sprintf("attachment %v was stored, but it differs from the file sent: sha1 %v (sent %s), size %v (sent %d), object %v (sent %v); the file may have changed while it was sent",
-					answer["id"], answer["sha1"], file.SHA1, answer["size"], file.Size, answer["object_id"], owner["id"]),
+				Cause: fmt.Sprintf("attachment %v was stored, but it differs from the file sent: name %q (sent %q), sha1 %v (sent %s), size %v (sent %d), object %v (sent %v); the file may have changed while it was sent, or Taiga rewrote its name",
+					answer["id"], fmt.Sprint(answer["name"]), file.Name, answer["sha1"], file.SHA1, answer["size"], file.Size, answer["object_id"], owner["id"]),
 				Recovery: "do not upload again blindly: check the attachment with `taiga attachment list`; it is saved as it arrived",
 				Exit:     output.ExitConflict}
 		}
@@ -359,7 +365,9 @@ func (s *Service) DownloadAttachment(ctx context.Context, kind string, owner Obj
 	if err := checkDownload(a, n, h); err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+	// The temporary file is 0600 while unchecked; the saved one gets the user's umask, like any
+	// file the user creates.
+	if err := os.Chmod(tmp.Name(), 0o666&^currentUmask()); err != nil {
 		return nil, err
 	}
 	if overwrite {
