@@ -69,6 +69,29 @@ taiga story comment 246 --body-file note.md
 taiga story comments 246 --output text
 ```
 
+## Attachments
+
+| Command | What it does |
+|---|---|
+| `taiga attachment list REF [--task]` | The attachments of a story (or of a task): `id`, `name`, `size`, `sha1`, `description`, `created_date`, `owner`, `is_deprecated` |
+| `taiga attachment upload REF FILE [--task] [--description TEXT] [--dry-run] [--timeout 10m]` | Attach a local file |
+| `taiga attachment download REF ATTACHMENT_ID [--task] [--to PATH\|-] [--overwrite] [--timeout 10m]` | Save an attachment, checked against its size and sha1 |
+
+- `upload` is idempotent by content: if the story or task already has an attachment with the same name and sha1, nothing is sent and that attachment comes back with `"created": false`. The same content under another name is a new attachment.
+- The upload is sent once and never repeated. Its answer is checked (sha1, size, object); a mismatch is `attachment_postcondition_failed` (exit 4): the file **was stored**. If the answer is lost, the CLI looks for a new attachment with that name and sha1: found, success; otherwise `attachment_unconfirmed` (exit 1). Check `attachment list` before uploading again.
+- The CLI has no size limit. The proxy in front of Taiga has one (50 MB at Basis): above it the upload fails with `payload_too_large` (exit 2). Empty files are refused, as Taiga refuses them.
+- `--dry-run` prints the form fields and the file's name, size and sha1, never its content.
+- Taiga's attachment `url` carries a signed token that opens the file without authentication for a few minutes, so it is never printed. `download` reads a fresh one and fetches it only from the same origin as the Taiga URL, without the `Authorization` header and without following redirects.
+- `download` saves to `--to` (a file or an existing directory), to stdout with `--to -`, or to the working directory. The server's file name is treated as untrusted: only its last element is used, with control and bidi characters replaced by `_`. An existing file is replaced only with `--overwrite`. The bytes go to a temporary file in the same directory and become the destination only after their size and sha1 match (`attachment_download_mismatch`, exit 7, otherwise). With `--to -`, a mismatch is reported at the end and what was written must be discarded.
+- Editing and deleting attachments stay in the web UI.
+
+```sh
+taiga attachment upload 246 report.pdf --description "staging run"
+taiga attachment list 246 --output text
+taiga attachment download 246 3121 --to ~/Downloads/
+taiga attachment download 18 3122 --task --to - | less
+```
+
 ## Custom fields
 
 | Command | What it does |
