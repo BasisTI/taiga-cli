@@ -130,8 +130,15 @@ func (a *App) warn(code, msg string) {
 	_ = a.emitErr("warning [" + presented(code) + "]: " + presented(msg) + "\n")
 }
 
-// prompt asks for input on stderr, so stdout stays clean for the result.
-func (a *App) prompt(s string) { _ = a.emitErr(presented(s)) }
+// prompt asks for input on stderr, so stdout stays clean for the result. The text is redacted
+// and kept on one line; the line breaks that end it are written as they are.
+func (a *App) prompt(s string) {
+	text := strings.TrimRight(s, "\n")
+	if text != "" {
+		text = presented(text)
+	}
+	_ = a.emitErr(text + s[len(strings.TrimRight(s, "\n")):])
+}
 
 // presentable returns v as it may be printed. Objects keep their type, for the text layout;
 // any other value is rewritten through its JSON, with the same key order and numbers.

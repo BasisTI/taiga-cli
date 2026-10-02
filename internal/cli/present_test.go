@@ -17,7 +17,7 @@ import (
 var outputRule = map[string][]string{
 	"App.Out/App.Err":                     {"present.go"},
 	"os.Stdout/os.Stderr":                 {"cmd/taiga/main.go"},
-	"emitFields/emitJSON/emitErr":         {"present.go"},
+	"emit*/renderPresented":               {"present.go"},
 	"rawOut":                              {"present.go", "api.go", "attachment.go"},
 	"cobra writer (SetOut, OutOrStdout…)": {"present.go"},
 }
@@ -81,8 +81,8 @@ func outputViolations(file string, src []byte) ([]string, error) {
 			switch {
 			case (name == "Out" || name == "Err") && !allowed("App.Out/App.Err", file):
 				add(x, "."+name+" outside present.go")
-			case (name == "emitFields" || name == "emitJSON" || name == "emitErr") && !allowed("emitFields/emitJSON/emitErr", file):
-				add(x, name+" outside present.go")
+			case (strings.HasPrefix(name, "emit") || name == "renderPresented") && !allowed("emit*/renderPresented", file):
+				add(x, name+" (writes without redacting) outside present.go")
 			case name == "rawOut" && !allowed("rawOut", file):
 				add(x, "rawOut outside api.go and attachment.go")
 			case cobraWriters[name] && !allowed("cobra writer (SetOut, OutOrStdout…)", file):
@@ -153,5 +153,58 @@ func TestOutputGuardCatchesBypasses(t *testing.T) {
 	}
 	if v, _ := outputViolations("cmd/taiga/main.go", []byte(`package main; import "os"; func main() { _ = os.Stdout; _ = os.Stderr }`)); len(v) != 0 {
 		t.Errorf("main.go: %v", v)
+	}
+}
+
+// The password prompt keeps its line break raw: only text is redacted and quoted.
+func TestPromptKeepsTheLineBreak(t *testing.T) {
+	var out strings.Builder
+	a := &App{Err: &out}
+	a.prompt("Password: ")
+	a.prompt("\n")
+	a.prompt("see http://h/p?token=PROMPTSECRET\n")
+	if got := out.String(); got != "Password: \nsee http://h/p?token=…\n" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// Every raw emitter is blocked outside present.go: emitOut too, and any new emit* by name.
+func TestOutputGuardBlocksEveryEmitter(t *testing.T) {
+	for _, src := range []string{
+		`package cli; func f(a *App) error { return a.emitOut("token=NEW_GUARD_SECRET\n") }`,
+		`package cli; func f(a *App) error { return a.emitSomethingNew("x") }`,
+		`package cli; func f(a *App) error { return a.renderPresented(nil, nil) }`,
+	} {
+		if v, _ := outputViolations("review_emit_bypass.go", []byte(src)); len(v) == 0 {
+			t.Errorf("not caught: %s", src)
+		}
+	}
+}
+
+// In present.go itself, a function that writes to App.Out or App.Err without redacting must be
+// an emitter (emit*, blocked elsewhere by name), rawOut or wireOutput; any other writer there
+// must redact, which this test cannot see, so new ones have to be added here on purpose.
+func TestPresentWritersAreKnown(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "present.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	known := map[string]bool{"rawOut": true, "wireOutput": true, "writeError": true}
+	for _, d := range f.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		touches := false
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if s, ok := n.(*ast.SelectorExpr); ok && (s.Sel.Name == "Out" || s.Sel.Name == "Err") {
+				touches = true
+			}
+			return true
+		})
+		if touches && !strings.HasPrefix(fn.Name.Name, "emit") && !known[fn.Name.Name] {
+			t.Errorf("%s writes to App.Out/App.Err: name it emit* (raw) or add it to known after checking it redacts", fn.Name.Name)
+		}
 	}
 }
