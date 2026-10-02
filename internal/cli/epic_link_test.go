@@ -235,3 +235,12 @@ func TestEpicLinkUnknownEpicSendsNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestEpicLinkPostRedirectIsNotExit7(t *testing.T) {
+	f, calls := newStoryFake(t)
+	f.fail["POST epics/9/related_userstories"] = 302
+	_, stderr, code := runIn(t, f.env(), "", "epic", "link", "91", "246")
+	if code != 1 || !strings.Contains(stderr, "epic_link_unconfirmed") || strings.Count(writeLog(*calls), "POST") != 1 {
+		t.Fatalf("%d %s writes %s", code, stderr, writeLog(*calls))
+	}
+}

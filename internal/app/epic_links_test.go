@@ -586,3 +586,113 @@ func TestReplaceEpicDeleteRefusedDoesNotPromiseConvergence(t *testing.T) {
 		t.Fatalf("err %v recovery %q", err, e.Recovery)
 	}
 }
+
+// updateWithReplace runs story update --subject new --replace-epic #2 on a story with epic #1,
+// with setup changing the fake first.
+func updateWithReplace(t *testing.T, setup func(f *linkAPI)) *output.Error {
+	t.Helper()
+	f, s := newLinkAPI(t, 11)
+	patched := false
+	setup(f)
+	s.API = &patchingAPI{linkAPI: f, patched: &patched}
+	_, err := s.UpdateStoryWithEpic(context.Background(), "246", Patch{Set: Object{"subject": "new"}}, epicRef(t, s, "2"), true, false, false)
+	e := output.AsError(err)
+	if !patched || e.Code != "story_updated_link_failed" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Recovery, "do not run the update command again") {
+		t.Fatalf("patched %v err %v", patched, err)
+	}
+	return e
+}
+
+func TestStoryUpdateConflictKeepsTheInspectRecovery(t *testing.T) {
+	e := updateWithReplace(t, func(f *linkAPI) {
+		inner := f.post
+		f.post = func(f *linkAPI, epic int64) (*taiga.Response, error) {
+			f.links[13] = true // linked by someone else between the POST and the removal
+			return inner(f, epic)
+		}
+	})
+	if !strings.Contains(e.Cause, "epic_links_postcondition_failed") || !strings.Contains(e.Recovery, "taiga story get") ||
+		strings.Contains(e.Recovery, "--replace --confirm-delete`") {
+		t.Fatalf("cause %q recovery %q", e.Cause, e.Recovery)
+	}
+}
+
+func TestStoryUpdateEpicsChangedBeforePostKeepsTheInspectRecovery(t *testing.T) {
+	e := updateWithReplace(t, func(f *linkAPI) {
+		f.onRead = func(f *linkAPI, n int) {
+			if n == 3 { // the re-read before the POST, after the PATCH
+				f.links[13] = true
+			}
+		}
+	})
+	if !strings.Contains(e.Cause, "version_conflict") || !strings.Contains(e.Recovery, "check them with `taiga story get 246` and decide before") {
+		t.Fatalf("cause %q recovery %q", e.Cause, e.Recovery)
+	}
+}
+
+func TestStoryUpdateDeleteRefusedKeepsThePermissionRecovery(t *testing.T) {
+	e := updateWithReplace(t, func(f *linkAPI) {
+		f.del = func(*linkAPI, int64) (*taiga.Response, error) {
+			return nil, &taiga.APIError{Status: 403, Method: "DELETE", Path: unlinkPath(11, 6808)}
+		}
+	})
+	if !strings.Contains(e.Cause, "epic_replace_incomplete") || !strings.Contains(e.Recovery, "modify_epic") || strings.Contains(e.Recovery, "converges") {
+		t.Fatalf("cause %q recovery %q", e.Cause, e.Recovery)
+	}
+}
+
+func TestStoryUpdateUncertainLinkPointsToEpicLink(t *testing.T) {
+	e := updateWithReplace(t, func(f *linkAPI) {
+		f.post = func(*linkAPI, int64) (*taiga.Response, error) { return nil, lostAnswer(linkPath(12)) }
+	})
+	if !strings.Contains(e.Recovery, "taiga epic link 2 246 --replace --confirm-delete") {
+		t.Fatalf("recovery %q", e.Recovery)
+	}
+}
+
+func TestLinkEpicPostRedirectIsUncertain(t *testing.T) {
+	for name, applied := range map[string]bool{"applied": true, "not applied": false} {
+		t.Run(name, func(t *testing.T) {
+			f, s := newLinkAPI(t, 11)
+			f.post = func(f *linkAPI, epic int64) (*taiga.Response, error) {
+				if applied {
+					f.links[epic] = true
+				}
+				return nil, &taiga.APIError{Status: 302, Method: "POST", Path: linkPath(epic)}
+			}
+			_, err := s.LinkEpic(context.Background(), linkStory(t, s), epicRef(t, s, "2"), true, false)
+			if exitOf(err) == output.ExitNetwork {
+				t.Fatalf("exit 7 after the POST was sent: %v", err)
+			}
+			if applied && err != nil || !applied && codeOf(err) != "epic_link_unconfirmed" {
+				t.Fatalf("err: %v", err)
+			}
+		})
+	}
+}
+
+func TestReplaceEpicDeleteRedirectIsNotExit7(t *testing.T) {
+	f, s := newLinkAPI(t, 11)
+	f.del = func(*linkAPI, int64) (*taiga.Response, error) {
+		return nil, &taiga.APIError{Status: 307, Method: "DELETE", Path: unlinkPath(11, 6808)}
+	}
+	_, err := s.LinkEpic(context.Background(), linkStory(t, s), epicRef(t, s, "2"), true, false)
+	e := output.AsError(err)
+	if e.Code != "epic_replace_incomplete" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Recovery, "run the same command again") {
+		t.Fatalf("err %v recovery %q", err, e.Recovery)
+	}
+}
+
+func TestStoryCreateWithEpicAlreadyLinkedReturnsTheStory(t *testing.T) {
+	f, s := newLinkAPI(t)
+	f.storyRef = 300
+	f.onRead = func(f *linkAPI, n int) { f.links[11] = true } // linked by another process before the re-read
+	got, err := s.CreateStoryWithEpic(context.Background(), Object{"subject": "S"}, epicRef(t, s, "1"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := got.(Object)
+	if ID(o["id"]) != 6808 || ID(o["ref"]) != 300 || !strings.HasSuffix(fmt.Sprint(o["url"]), "/us/300") || strings.Contains(f.writes(), "related_userstories") {
+		t.Fatalf("story %v writes %s", o, f.writes())
+	}
+}

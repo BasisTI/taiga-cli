@@ -180,8 +180,11 @@ func (s *Service) postLink(ctx context.Context, story, epic Object) error {
 	}
 	var ae *taiga.APIError
 	duplicate := errors.As(err, &ae) && ae.Status == 400
+	// A redirect answers a POST that was sent: the client never follows it, and a proxy may
+	// have passed the request on, so the outcome is decided by the re-read, never exit 7.
+	redirect := ae != nil && ae.Status >= 300 && ae.Status < 400
 	var ue *taiga.UnreadableBodyError
-	if !duplicate && !errors.As(err, &ue) && (taiga.NotSent(err) || !unknownOutcome(err)) {
+	if !duplicate && !redirect && !errors.As(err, &ue) && (taiga.NotSent(err) || !unknownOutcome(err)) {
 		return taiga.ToOutput(err)
 	}
 	// The POST may have failed because its context is done: the check gets its own deadline.
@@ -240,7 +243,7 @@ func (s *Service) removeOld(ctx context.Context, story, epic Object, before, old
 }
 
 func replaceIncomplete(story, epic Object, removed, remaining []storyLink, why, stage string, refused bool) error {
-	note, recovery := " (the first one may or may not be removed)", "run the same command again: it re-reads the story and finishes the replacement"
+	note, recovery := " (the first one may or may not be removed)", rerunRecovery+": it re-reads the story and finishes the replacement"
 	if refused {
 		note = ""
 		recovery = "Taiga refused to remove a link, so running the command again will not finish it: check the modify_epic permission with `taiga auth status --diagnose` (an epic of another project needs it there), or remove the remaining links in the web UI; the new link is saved"
@@ -284,14 +287,33 @@ func (s *Service) linkResult(story, epic Object, changed, linked bool, removed, 
 		"removed": linkLabels(removed), "epics": linkLabels(final)}
 }
 
+// rerunRecovery starts the recovery of a replacement that running the same command finishes.
+const rerunRecovery = "run the same command again"
+
 // afterWrite turns an error of the link that follows a story write into code (exit 1): the
 // story write is saved, so neither the code nor the exit may read as "safe to repeat" (exit 7,
-// version_conflict, epic_link_unconfirmed). The link's own code stays in the cause.
-func afterWrite(err error, code, saved, recovery string) error {
+// version_conflict, epic_link_unconfirmed). The link's own code stays in the cause. The
+// recovery starts with doNot and keeps what the link error asked for: an uncertain or
+// unfinished link is finished by `finish` (epic link converges); a concurrent change of the
+// story's epics is inspected first; any other error keeps its own recovery.
+func afterWrite(err error, code, saved, doNot, finish string, ref any) error {
 	e := *output.AsError(err)
+	switch {
+	case e.Code == "epic_link_unconfirmed" || e.Exit == output.ExitNetwork ||
+		e.Code == "epic_replace_incomplete" && strings.HasPrefix(e.Recovery, rerunRecovery):
+		e.Recovery = fmt.Sprintf("%s; finish the link with `%s` (running it again converges)", doNot, finish)
+	case e.Code == "version_conflict":
+		e.Recovery = fmt.Sprintf("%s; the story's epics changed meanwhile: check them with `taiga story get %v` and decide before linking with `%s`", doNot, ref, finish)
+	case e.Code == "epic_links_postcondition_failed":
+		// Someone else is changing the story's epics: no command is offered before inspection.
+		e.Recovery = fmt.Sprintf("%s; for the epic link: %s", doNot, e.Recovery)
+	case e.Recovery != "":
+		e.Recovery = fmt.Sprintf("%s; for the epic link: %s; once that is fixed, finish with `%s`", doNot, e.Recovery, finish)
+	default:
+		e.Recovery = fmt.Sprintf("%s; check the story with `taiga story get %v` before linking with `%s`", doNot, ref, finish)
+	}
 	e.Cause = fmt.Sprintf("%s [%s]; %s", saved, e.Code, e.Cause)
 	e.Code, e.Exit = code, output.ExitUnexpected
-	e.Recovery = recovery
 	return &e
 }
 
@@ -311,7 +333,11 @@ func (s *Service) CreateStoryWithEpic(ctx context.Context, body Object, epic Obj
 	_, after, err := s.linkEpic(ctx, view, epic, false, false)
 	if err != nil {
 		return nil, afterWrite(err, "story_created_link_failed", fmt.Sprintf("the story was created as #%v, but linking it to epic #%v failed", view["ref"], epic["ref"]),
-			fmt.Sprintf("do not run the create command again (it would create another story); run `taiga epic link %v %v`", epic["ref"], view["ref"]))
+			"do not run the create command again (it would create another story)", fmt.Sprintf("taiga epic link %v %v", epic["ref"], view["ref"]), view["ref"])
+	}
+	if after == nil {
+		// Someone else linked the new story first: the created story is the answer.
+		return view, nil
 	}
 	return s.StoryView(after)
 }
@@ -361,8 +387,7 @@ func (s *Service) UpdateStoryWithEpic(ctx context.Context, ref string, p Patch, 
 			flag = " --replace --confirm-delete"
 		}
 		return nil, afterWrite(err, "story_updated_link_failed", fmt.Sprintf("the other changes to story #%v were saved, but the epic link failed", before["ref"]),
-			fmt.Sprintf("do not run the update command again (it would repeat the other changes); finish the link with `taiga epic link %v %v%s`",
-				epic["ref"], before["ref"], flag))
+			"do not run the update command again (it would repeat the other changes)", fmt.Sprintf("taiga epic link %v %v%s", epic["ref"], before["ref"], flag), before["ref"])
 	}
 	if after == nil {
 		// The link was already there: the story is the PATCH result, or the read before it.
