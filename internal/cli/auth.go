@@ -227,7 +227,7 @@ func (a *App) printStatus(ctx context.Context, diagnose bool) error {
 				if err != nil {
 					return nil, err
 				}
-				return s.Project, nil
+				return s.ProjectView(), nil // without credentials and signed URLs, like project get
 			}}
 		v.Checks = auth.Diagnose(ctx, auth.DiagnoseInput{Env: a.Env, Store: r.Store, Ref: ref, Secret: r.Secret, KeyringProbe: probe, StdinTTY: a.stdinIsTTY(), Now: time.Now, Project: project})
 	}

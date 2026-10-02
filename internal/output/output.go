@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
+	"unicode"
 )
 
 type Mode int
@@ -73,18 +76,33 @@ func WriteError(w io.Writer, m Mode, e *Error) error {
 	if m == JSON {
 		return WriteJSON(w, map[string]*Error{"error": e})
 	}
-	s := fmt.Sprintf("error [%s]\n", e.Code)
+	s := fmt.Sprintf("error [%s]\n", Quote(e.Code))
 	if e.Cause != "" {
-		s = fmt.Sprintf("error [%s]: %s\n", e.Code, e.Cause)
+		s = fmt.Sprintf("error [%s]: %s\n", Quote(e.Code), Quote(e.Cause))
 	}
 	if e.Stage != "" {
-		s += fmt.Sprintf("  at: %s\n", e.Stage)
+		s += fmt.Sprintf("  at: %s\n", Quote(e.Stage))
 	}
 	if e.Recovery != "" {
-		s += fmt.Sprintf("  fix: %s\n", e.Recovery)
+		s += fmt.Sprintf("  fix: %s\n", Quote(e.Recovery))
 	}
 	_, err := io.WriteString(w, s)
 	return err
+}
+
+// UnsafeRune is a rune that can break or disguise a line of text output: controls, line and
+// paragraph separators, and format characters such as bidi overrides.
+func UnsafeRune(r rune) bool {
+	return unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp)
+}
+
+// Quote returns s as is, or Go-quoted when it has an unsafe rune: text that often comes from
+// the server (an error cause, a name) then stays on one line and shows what it carries.
+func Quote(s string) string {
+	if strings.ContainsFunc(s, UnsafeRune) {
+		return strconv.Quote(s)
+	}
+	return s
 }
 
 // WriteJSON writes v as indented JSON without HTML escaping.

@@ -176,15 +176,16 @@ func (s *Service) epicsEnabled() error {
 	return nil
 }
 
-// epicView is the output form of an epic: tag names, the web URL, signed URLs hidden.
+// epicView is the output form of an epic: tag names, the web URL, signed URLs hidden. Every
+// derived value comes from the scrubbed copy, never from o: the tags must stay redacted.
 func (s *Service) epicView(o Object) (Object, error) {
 	view := scrub(o).(Object)
-	names, err := Names(o["tags"])
+	names, err := Names(view["tags"])
 	if err != nil {
 		return nil, err
 	}
 	view["tags"] = names
-	view["url"] = s.API.BaseURL() + "/project/" + url.PathEscape(fmt.Sprint(s.Project["slug"])) + "/epic/" + fmt.Sprint(o["ref"])
+	view["url"] = taiga.RedactTokens(s.API.BaseURL() + "/project/" + url.PathEscape(fmt.Sprint(s.Project["slug"])) + "/epic/" + fmt.Sprint(view["ref"]))
 	return view, nil
 }
 

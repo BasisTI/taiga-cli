@@ -71,7 +71,7 @@ taiga story comments 246 --output text
 
 ## Projects, members, milestones and epics
 
-Read-only commands. Every object they print has the `token=` value of signed media links (project logos, user photos) hidden.
+Read-only commands. Every string they print, nested ones and tags included, has the value of any token parameter hidden (`token=`, `access_token=`, and the same key spelled with percent escapes or HTML entities, such as `%74oken=`): signed media links (project logos, user photos) open files without authentication.
 
 | Command | What it does |
 |---|---|
@@ -179,7 +179,7 @@ taiga project apply -f taiga-project.toml
 
 ## Output and exit codes
 
-Without a terminal on stdout, `taiga` prints JSON; on a terminal it prints text. Force either with `--output json` or `--output text`. Errors go to stderr as `{"error":{"code","source","stage","cause","recovery"}}`; `code` is stable and `cause` never contains a secret.
+Without a terminal on stdout, `taiga` prints JSON; on a terminal it prints text. Force either with `--output json` or `--output text`. Errors go to stderr as `{"error":{"code","source","stage","cause","recovery"}}`; `code` is stable and `cause` never contains a secret. In text mode, any value with control or bidi characters (often the server's own text) is printed Go-quoted, on one line.
 
 | Exit | Meaning |
 |---|---|

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"mime/multipart"
 	"net"
@@ -195,21 +196,46 @@ func (e *LocalWriteError) Error() string { return "writing the downloaded file: 
 func (e *LocalWriteError) Unwrap() error { return e.Err }
 
 var (
-	urlQuery   = regexp.MustCompile(`\?[^\s"'<>#]+`)
-	tokenParam = regexp.MustCompile(`(?i)(token=)[^&\s"'<>#]*`)
+	urlQuery = regexp.MustCompile(`\?[^\s"'<>#]+`)
+	// param is any key=value: the key runs back to the previous delimiter (an HTML entity such
+	// as &#111; stays inside it), the value up to the next one. Whether it is a token is decided
+	// on the decoded key (tokenKey).
+	param = regexp.MustCompile(`((?:&#?[0-9A-Za-z]+;?|[^\s?&"'<>#=])+)=([^&\s"'<>#]*)`)
 )
 
 // RedactSecrets hides the query of every URL in s, and any bare token= value: signed URLs
 // carry their credential there.
 func RedactSecrets(s string) string {
-	s = urlQuery.ReplaceAllString(s, "?…")
-	return tokenParam.ReplaceAllString(s, "${1}…")
+	return RedactTokens(urlQuery.ReplaceAllString(s, "?…"))
 }
 
-// RedactTokens hides only the value of every token= parameter in s, keeping the rest of the
-// text: read output keeps the URLs users wrote, but never a signed link's credential.
+// RedactTokens hides only the value of every token parameter in s, keeping the rest of the
+// text: read output keeps the URLs users wrote, but never a signed link's credential. The key
+// is compared decoded, so %74oken=, T%4FKEN= or t&#111;ken= are tokens too.
 func RedactTokens(s string) string {
-	return tokenParam.ReplaceAllString(s, "${1}…")
+	return param.ReplaceAllStringFunc(s, func(m string) string {
+		key := m[:strings.IndexByte(m, '=')]
+		if !tokenKey(key) {
+			return m
+		}
+		return key + "=…"
+	})
+}
+
+// tokenKey reports whether key, once its HTML entities and percent escapes are decoded (a few
+// rounds, for double encoding), ends with "token" in any case: token, access_token, TOKEN.
+func tokenKey(key string) bool {
+	for range 4 {
+		k := html.UnescapeString(key)
+		if u, err := url.PathUnescape(k); err == nil {
+			k = u
+		}
+		if k == key {
+			break
+		}
+		key = k
+	}
+	return strings.HasSuffix(strings.ToLower(key), "token")
 }
 
 // redactURLSecrets is RedactSecrets plus every value of u's query, raw or escaped, wherever it

@@ -204,3 +204,27 @@ func TestEpicsRefusedWhenModuleIsOff(t *testing.T) {
 		t.Fatalf("read epics with the module off: %v", f.queries)
 	}
 }
+
+// Tags are derived after the scrub: a tag carrying token= is redacted like any other string.
+func TestEpicTagsAreRedacted(t *testing.T) {
+	f := epicFake()
+	f.lists["epics"] = `[{"id":90,"ref":9,"project":37,"subject":"s","tags":[["token=signed_sentinel",null],["%74oken=signed_sentinel","#fff"]],"is_closed":false}]`
+	f.objects["epics/by_ref"] = `{"id":90,"ref":9,"project":37,"subject":"s","tags":[["token=signed_sentinel",null]],"is_closed":false}`
+	s := service(t, f)
+	list, err := s.Epics(context.Background(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.EpicDetail(context.Background(), "9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []any{list, got} {
+		if b, _ := json.Marshal(v); strings.Contains(string(b), "signed_sentinel") {
+			t.Fatalf("tag token leaked: %s", b)
+		}
+	}
+	if tags, _ := json.Marshal(list[0]["tags"]); string(tags) != `["token=…","%74oken=…"]` {
+		t.Fatalf("tags %s", tags)
+	}
+}

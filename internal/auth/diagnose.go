@@ -138,12 +138,22 @@ func checkProject(ctx context.Context, in ProjectInput) Check {
 		}
 		return c
 	}
+	// A shape Taiga 6.7 never sends must not read as "no permissions" or "no swimlanes".
+	unexpected := func(what string) Check {
+		c.Status, c.Detail = "failed", in.Selected+" ("+in.Source+"): unexpected response: "+what
+		return c
+	}
 	have := map[string]bool{}
-	perms, _ := p["my_permissions"].([]any)
+	perms, ok := p["my_permissions"].([]any)
+	if !ok {
+		return unexpected("my_permissions is not a list")
+	}
 	for _, x := range perms {
-		if s, ok := x.(string); ok {
-			have[s] = true
+		s, ok := x.(string)
+		if !ok {
+			return unexpected("my_permissions has an entry that is not text")
 		}
+		have[s] = true
 	}
 	missing := []string{}
 	for _, perm := range projectPermissions {
@@ -151,7 +161,10 @@ func checkProject(ctx context.Context, in ProjectInput) Check {
 			missing = append(missing, perm)
 		}
 	}
-	lanes, _ := p["swimlanes"].([]any)
+	lanes, ok := p["swimlanes"].([]any)
+	if !ok && p["swimlanes"] != nil {
+		return unexpected("swimlanes is neither a list nor null")
+	}
 	onOff := func(k string) string {
 		if p[k] == true {
 			return "on"

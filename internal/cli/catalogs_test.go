@@ -17,7 +17,7 @@ type catalogFake struct {
 func newCatalogFake(t *testing.T) (*catalogFake, string, *[]recorded) {
 	f := &catalogFake{project: map[string]any{"id": 37, "slug": "infra-2025", "name": "Infra 2025", "is_private": true,
 		"i_am_member": true, "i_am_admin": false, "is_epics_activated": true, "is_kanban_activated": true, "is_backlog_activated": false,
-		"logo_small_url": "http://t/media/logo.png?token=SECRET"}}
+		"logo_small_url": "http://t/media/logo.png?token=SECRET", "my_permissions": []any{}}}
 	srv, calls := fakeTaiga(t, func(w http.ResponseWriter, r *http.Request) {
 		path, q := strings.TrimPrefix(r.URL.Path, "/api/v1/"), r.URL.Query()
 		write := func(v any) { _ = json.NewEncoder(w).Encode(v) }

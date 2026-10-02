@@ -100,3 +100,28 @@ func TestDiagnoseProjectFailures(t *testing.T) {
 		}
 	}
 }
+
+func TestDiagnoseProjectUnexpectedShapes(t *testing.T) {
+	base := func() map[string]any {
+		return map[string]any{"id": json.Number("37"), "slug": "infra", "i_am_member": true, "my_permissions": []any{"view_us"}, "swimlanes": nil}
+	}
+	for name, change := range map[string]func(map[string]any){
+		"permissions string":  func(p map[string]any) { p["my_permissions"] = "view_us" },
+		"permissions missing": func(p map[string]any) { delete(p, "my_permissions") },
+		"permission not text": func(p map[string]any) { p["my_permissions"] = []any{"view_us", 7} },
+		"swimlanes object":    func(p map[string]any) { p["swimlanes"] = map[string]any{"id": 1} },
+		"swimlanes number":    func(p map[string]any) { p["swimlanes"] = json.Number("2") },
+	} {
+		p := base()
+		change(p)
+		c := projectCheck(t, ProjectInput{Selected: "infra", Source: "flag", Load: func(context.Context) (map[string]any, error) { return p, nil }})
+		if c.Status != "failed" || !strings.Contains(c.Detail, "unexpected response") || c.Data != nil {
+			t.Errorf("%s: %+v", name, c)
+		}
+	}
+	// null swimlanes is how Taiga answers a project without them.
+	c := projectCheck(t, ProjectInput{Selected: "infra", Source: "flag", Load: func(context.Context) (map[string]any, error) { return base(), nil }})
+	if c.Status != "ok" || !strings.Contains(c.Detail, "swimlanes=0") {
+		t.Fatalf("%+v", c)
+	}
+}

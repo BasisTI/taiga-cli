@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf16"
 
 	"github.com/BasisTI/taiga-cli/internal/app"
@@ -181,8 +180,5 @@ func escapeJSON(s string) string {
 	return b.String()
 }
 
-// unsafeRune is a rune that can break or disguise a "key: value" line: controls, line and
-// paragraph separators, and format characters such as bidi overrides.
-func unsafeRune(r rune) bool {
-	return unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp)
-}
+// unsafeRune is a rune that can break or disguise a "key: value" line (output.UnsafeRune).
+func unsafeRune(r rune) bool { return output.UnsafeRune(r) }
