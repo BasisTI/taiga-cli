@@ -71,6 +71,9 @@ func TestProbeTaskContract(t *testing.T) {
 
 	// 7. task-statuses: is_closed, how many closed ones in the default template.
 	t.Logf("FINDING task-statuses: %d open, %d closed (%v)", len(open), len(closed), closed)
+	for _, st := range probeList(t, c, "task-statuses", url.Values{"project": {fmt.Sprint(project)}}) {
+		t.Logf("FINDING task status %s closed=%s", st["name"], st["is_closed"])
+	}
 	if len(open) < 2 || len(closed) == 0 {
 		t.Fatalf("task statuses: open %v closed %v", open, closed)
 	}
@@ -236,6 +239,22 @@ func TestProbeTaskContract(t *testing.T) {
 	t.Logf("FINDING userstories/by_ref with a task ref of this project: status %d", probeStatus(err))
 	if probeStatus(err) != 404 {
 		t.Fatalf("userstories/by_ref with a task ref of this project: %v", err)
+	}
+
+	// Sprint: a task created in a story with a milestone, and after the story moves.
+	day := time.Now().Format("2006-01-02")
+	ms := func(name string) int64 {
+		return probeDo(t, c, "POST", "milestones", nil, map[string]any{"project": project, "name": name + " " + suffix, "estimated_start": day, "estimated_finish": day}).int("id")
+	}
+	m1, m2 := ms("sprint 1"), ms("sprint 2")
+	s3 := createStory(t, c, project, "task probe story 3 "+suffix, map[string]any{"milestone": m1})
+	t4 := probeDo(t, c, "POST", "tasks", nil, map[string]any{"project": project, "user_story": s3.int("id"), "subject": "in sprint " + suffix})
+	t.Logf("FINDING task created in a story of milestone %d: milestone=%s", m1, t4["milestone"])
+	patchStory(t, c, s3.int("id"), map[string]any{"milestone": m2})
+	moved := probeDo(t, c, "GET", fmt.Sprintf("tasks/%d", t4.int("id")), nil, nil)
+	t.Logf("FINDING after the story moves to milestone %d: task milestone=%s", m2, moved["milestone"])
+	if t4.int("milestone") != m1 || moved.int("milestone") != m2 {
+		t.Fatalf("the task does not follow the story's sprint: %d then %d", t4.int("milestone"), moved.int("milestone"))
 	}
 
 	// Closing: is_closed follows the status.

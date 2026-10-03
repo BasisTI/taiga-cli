@@ -702,8 +702,9 @@ convidado por e-mail) em projetos descartáveis (`cli-test-probe-tasks-<sufixo>`
 
 | Requisição | Resultado |
 |---|---|
-| `POST tasks {project, user_story, subject, status, tags, assigned_to, due_date}` | 201; `version` 1; tags em pares `[nome, cor]`, minúsculas; **sem `assigned_users`** (um responsável só, `assigned_to`); traz `owner`, `user_story`, `milestone` (`null` aqui: a story não tinha sprint; a herança não foi sondada), `is_closed`, `due_date`, `due_date_reason`, `due_date_status`, `is_blocked`, `blocked_note`, `created_date` |
+| `POST tasks {project, user_story, subject, status, tags, assigned_to, due_date}` | 201; `version` 1; tags em pares `[nome, cor]`, minúsculas; **sem `assigned_users`** (um responsável só, `assigned_to`); traz `owner`, `user_story`, `milestone` (o da story), `is_closed`, `due_date`, `due_date_reason`, `due_date_status`, `is_blocked`, `blocked_note`, `created_date` |
 | `ref` da task | **mesma sequência das stories** do projeto (stories 1 e 2, task 3) |
+| sprint da task | **herda a da story**: task criada numa story da sprint 1 nasce com `milestone` 1; a story passa para a sprint 2 e a task acompanha. Por isso a CLI não tem `--milestone` em task |
 | `POST tasks` sem `user_story` | 201, `user_story: null` (a CLI exige `--story`; task solta só por `taiga api`) |
 | `user_story` de outro projeto | **400** `WrongArguments` "You don't have permissions to set this user story to this task." |
 | `due_date` fora de `AAAA-MM-DD` (`31/12/2026`, `2026-02-30`) | **400** "Date has wrong format" |
@@ -735,7 +736,7 @@ resposta mostra o valor gravado inteiro.
 
 - Bloqueio igual ao da story: `blocked_note` sem `is_blocked` é descartada; `is_blocked: false` limpa a nota.
 - `due_date: null` limpa; `due_date_reason` é texto livre e independente (a CLI não o expõe).
-- `task-statuses` do template padrão: 4 abertos e **1 fechado** (`Closed`). Mudar para o status fechado põe
+- `task-statuses` do template padrão: `New`, `In progress`, `Ready for test`, `Needs Info` abertos e **um só fechado**, `Closed`. Mudar para o status fechado põe
   `is_closed: true` e `finished_date`.
 
 ### Comentários
