@@ -143,23 +143,21 @@ func TestIntegrationTaskLostAnswers(t *testing.T) {
 	env, _, _ := freshProject(t, "cli-test-tasks-lost-"+suffix)
 	story := fmt.Sprint(storyJSON(t, env, "", "story", "create", "--subject", "story")["ref"])
 
-	// POST applied, answer lost: the task is found by its fields, never created twice, with a warning.
+	// POST applied, answer lost: uncertain (option B): the task is named for inspection, never
+	// returned as the result, and never created twice.
 	out, errOut, code := runIn(t, dropAnswer(t, env, "POST", "tasks", true), "", "task", "create", "--story", story, "--subject", "lost "+suffix, "--tag", "a", "--due-date", "2026-12-31")
-	var created map[string]any
-	if err := json.Unmarshal([]byte(out), &created); err != nil || code != 0 || !strings.Contains(errOut, "warning [task_create_matched]") {
-		t.Fatalf("applied-lost: %d %s %s", code, out, errOut)
+	ref := taskRefs(t, env, "--story", story)
+	if code != 1 || out != "" || !strings.Contains(errOut, "task_create_unconfirmed") || !strings.Contains(errOut, "taiga task get "+ref) || strings.Contains(ref, ",") || ref == "" {
+		t.Fatalf("applied-lost: %d %q %s (tasks %q)", code, out, errOut, ref)
 	}
-	if got := taskRefs(t, env, "--story", story); got != fmt.Sprint(created["ref"]) {
-		t.Fatalf("applied-lost: %q, created %v", got, created["ref"])
-	}
+	created := storyJSON(t, env, "", "task", "get", ref)
 	// POST not applied, answer lost: unconfirmed, exit 1, nothing created.
 	_, errOut, code = runIn(t, dropAnswer(t, env, "POST", "tasks", false), "", "task", "create", "--story", story, "--subject", "never "+suffix)
-	if code != 1 || !strings.Contains(errOut, "task_create_unconfirmed") || taskRefs(t, env, "--story", story) != fmt.Sprint(created["ref"]) {
+	if code != 1 || !strings.Contains(errOut, "task_create_unconfirmed") || !strings.Contains(errOut, "no new task") || taskRefs(t, env, "--story", story) != ref {
 		t.Fatalf("not-applied-lost: %d %s", code, errOut)
 	}
 
 	// PATCH applied, answer lost: the re-read confirms it; the description is appended once.
-	ref := fmt.Sprint(created["ref"])
 	path := fmt.Sprintf("tasks/%v", created["id"])
 	updated := storyJSON(t, dropAnswer(t, env, "PATCH", path, true), "", "task", "update", ref, "--append-description", "uma vez")
 	if updated["description"] != "uma vez" {
@@ -287,37 +285,12 @@ func otherProcess(t *testing.T, env map[string]string, status int, body map[stri
 	return out
 }
 
-// A lost POST while another process of the same account creates a task with the same subject:
-// a candidate with other fields is shown, never adopted; one with every field equal is taken,
-// with the warning that the match is not a proof.
-func TestIntegrationTaskCreateLostNextToAnotherProcess(t *testing.T) {
+// A lost POST while another process of the same account creates a task with the same subject,
+// with the request's fields or with others: the candidate is named for inspection, never adopted
+// (option B: no comparison of state proves where a task came from).
+func TestIntegrationTaskCreateLostNeverAdoptsAnotherProcess(t *testing.T) {
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	env, _, pid := freshProject(t, "cli-test-tasks-other-"+suffix)
-	s := storyJSON(t, env, "", "story", "create", "--subject", "story")
-	story := fmt.Sprint(s["ref"])
-	for _, status := range []int{502, 302} {
-		subject := fmt.Sprintf("Escrever testes %d %s", status, suffix)
-		theirs := map[string]any{"project": pid, "user_story": s["id"], "subject": subject, "description": "created by process B", "tags": []string{"process-b"}}
-		_, errOut, code := runIn(t, otherProcess(t, env, status, theirs), "requested by process A", "task", "create", "--story", story,
-			"--subject", subject, "--description-file", "-", "--tag", "process-a", "--due-date", "2026-12-31")
-		if code != 1 || !strings.Contains(errOut, "task_create_unconfirmed") || !strings.Contains(errOut, "differ from what this creation would produce") || strings.Contains(errOut, "warning") {
-			t.Fatalf("%d, other fields: %d %s", status, code, errOut)
-		}
-		same := map[string]any{"project": pid, "user_story": s["id"], "subject": subject + " same", "description": "same", "tags": []string{"x"}, "due_date": "2026-12-31"}
-		out, errOut, code := runIn(t, otherProcess(t, env, status, same), "same", "task", "create", "--story", story,
-			"--subject", subject+" same", "--description-file", "-", "--tag", "X", "--due-date", "2026-12-31")
-		if code != 0 || !strings.Contains(out, "same") || !strings.Contains(errOut, "warning [task_create_matched]") {
-			t.Fatalf("%d, same fields: %d %s %s", status, code, out, errOut)
-		}
-	}
-}
-
-// A minimal create (subject only) with a lost POST while another process of the same account
-// creates the same subject with one more field: the candidate differs from what this creation
-// would produce (the defaults) and is never adopted; with the defaults, it is taken with the warning.
-func TestIntegrationTaskCreateLostComparesOmittedDefaults(t *testing.T) {
-	suffix := fmt.Sprint(time.Now().UnixNano())
-	env, _, pid := freshProject(t, "cli-test-tasks-defaults-"+suffix)
 	s := storyJSON(t, env, "", "story", "create", "--subject", "story")
 	story := fmt.Sprint(s["ref"])
 	closed := ""
@@ -326,30 +299,25 @@ func TestIntegrationTaskCreateLostComparesOmittedDefaults(t *testing.T) {
 			closed = fmt.Sprint(st["id"])
 		}
 	}
-	me := storyJSON(t, env, "", "api", "GET", "users/me")["id"]
 	for name, extra := range map[string]map[string]any{
-		"status":      {"status": closed},
-		"description": {"description": "other process"},
-		"tags":        {"tags": []string{"other-process"}},
-		"due_date":    {"due_date": "2026-12-31"},
-		"assigned_to": {"assigned_to": me},
-		"none":        nil,
+		"same fields": nil,
+		"closed":      {"status": closed},
+		"description": {"description": "created by process B"},
 	} {
 		for _, status := range []int{502, 302} {
-			subject := fmt.Sprintf("omitted %s %d %s", name, status, suffix)
+			subject := fmt.Sprintf("other %s %d %s", name, status, suffix)
 			theirs := map[string]any{"project": pid, "user_story": s["id"], "subject": subject}
 			for k, v := range extra {
 				theirs[k] = v
 			}
 			out, errOut, code := runIn(t, otherProcess(t, env, status, theirs), "", "task", "create", "--story", story, "--subject", subject)
-			if name == "none" {
-				if code != 0 || !strings.Contains(out, subject) || !strings.Contains(errOut, "warning [task_create_matched]") {
-					t.Errorf("%s %d: %d %s %s", name, status, code, out, errOut)
-				}
-				continue
+			candidate := ""
+			for _, it := range catalogList(t, env, "task", "list", "--story", story, "--search", subject) {
+				candidate = fmt.Sprint(it["ref"])
 			}
-			if code != 1 || !strings.Contains(errOut, "task_create_unconfirmed") || !strings.Contains(errOut, name) || strings.Contains(errOut, "warning") || out != "" {
-				t.Errorf("%s %d: %d %s %s", name, status, code, out, errOut)
+			if code != 1 || out != "" || !strings.Contains(errOut, "task_create_unconfirmed") || candidate == "" || !strings.Contains(errOut, "#"+candidate+" (id ") ||
+				!strings.Contains(errOut, "taiga task get "+candidate) || strings.Contains(errOut, "warning") {
+				t.Errorf("%s %d: %d %q %s", name, status, code, out, errOut)
 			}
 		}
 	}

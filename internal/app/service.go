@@ -36,12 +36,7 @@ type Service struct {
 	API      API
 	Project  Object
 	catalogs map[string][]Object
-	// Warnings are printed on stderr after a successful command: things the result does not show.
-	Warnings []Warning
 }
-
-// Warning is a note about a successful result, for the caller to print.
-type Warning struct{ Code, Message string }
 
 func Decode(b []byte) (Object, error) {
 	var out Object

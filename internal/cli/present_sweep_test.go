@@ -128,7 +128,7 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 		stdin string
 		args  []string
 	}{func() map[string]string { _, env := story(); return env }, sweepURL, []string{"story", "create", "--subject", "s", "--description-file", "-", "--dry-run"}})
-	// A create confirmed by matching fields after a lost answer prints a warning.
+	// A create whose answer is lost names its candidates in the error.
 	cases = append(cases, struct {
 		env   func() map[string]string
 		stdin string

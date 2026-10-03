@@ -240,13 +240,7 @@ func (a *App) taskWriteCmd(update bool) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if err := a.renderTask(result); err != nil {
-			return err
-		}
-		for _, w := range service.Warnings {
-			a.warn(w.Code, w.Message)
-		}
-		return nil
+		return a.renderTask(result)
 	}
 	fl.register(cmd, "task", update)
 	f := cmd.Flags()
