@@ -69,6 +69,34 @@ taiga story comment 246 --body-file note.md
 taiga story comments 246 --output text
 ```
 
+## Tasks
+
+`taiga task` works on the tasks of the selected project. Like a story, a task is named by its reference (`REF`; stories and tasks share the same sequence of references in a project), and `task get --id` takes the internal id and still checks the project. A task belongs to a story: `task create` requires `--story` (a task without a story only through `taiga api`), and its sprint is the story's.
+
+| Command | What it does |
+|---|---|
+| `taiga task list [--story REF] [--status S] [--assignee USER\|me] [--tag T]... [--search TEXT] [--closed[=false]]` | Every matching task, without manual paging; every filter is also checked locally |
+| `taiga task get REF` / `taiga task get --id ID` | One task, with its web `url`; JSON output also carries `custom_attributes` |
+| `taiga task create --story REF --subject S [--description-file F\|-] [--status S] [--tag T]... [--assignee USER] [--due-date YYYY-MM-DD]` | Create a task in the story |
+| `taiga task update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--assignee USER\|--clear-assignee] [--block NOTE\|--unblock] [--due-date YYYY-MM-DD\|--clear-due-date]` | Send only the fields that change, with the task `version` |
+| `taiga task close REF [--status S]` | Move to a closed status; nothing else changes |
+| `taiga task field list REF` / `taiga task field set REF ["Name=value"]... [--unset NAME]...` | Custom field values, like `story field` |
+| `taiga task comment REF --body TEXT\|--body-file F\|-` / `taiga task comments REF [--include-system]` | Comments, like `story comment`/`comments` (entries carry `task_ref`) |
+
+- Statuses come from the task statuses of the project (`taiga status list --kind task`). A task has a single assignee (`assigned_to`): `--assignee` sets it (a project member: username, id or `me`), `--clear-assignee` removes it. Taiga's concurrency check covers it on tasks, so a concurrent change is a `version_conflict` (exit 4), unlike the main assignee of a story.
+- `--block NOTE` sets `is_blocked` with the note (required); `--unblock` clears both. `--due-date` takes `YYYY-MM-DD`; `--clear-due-date` removes it.
+- `close` only changes the status. Without `--status` it uses the project's only closed status (the default template has one task status, `Closed`); with several it asks for one. Unlike the MCP's `archive_or_close`, it never adds an "archived" tag.
+- Every write accepts `--dry-run` and, except `create`, `--force-version`.
+- A write whose answer is lost after the request left (network error, 5xx or a redirect) never exits 7: `create` looks for the new task in the story (one found, the command succeeds; otherwise `task_create_unconfirmed`, exit 1), and `update`, `close` and `field set` re-read the task (the change is there, success; otherwise `task_update_unconfirmed`, exit 1). In both cases do **not** re-run blindly: check with `taiga task list --story REF` or `taiga task get REF` first, since a re-run could create a second task or append the description twice.
+
+```sh
+taiga task list --story 246 --closed=false
+taiga task create --story 246 --subject "Write the tests" --assignee me --due-date 2026-10-31
+taiga task update 250 --status "In progress" --block "waiting for the B6 review"
+taiga task close 250
+taiga task comment 250 --body "Done in staging."
+```
+
 ## Projects, members, milestones and epics
 
 Read-only commands. Every string they print, nested ones and tags included, has the value of any token parameter hidden (`token=`, `access_token=`, and the same key spelled with percent escapes or HTML entities, such as `%74oken=`, and inside the value of another parameter, as in `link=https://h/a?token=…`): signed media links (project logos, user photos) open files without authentication. A text in which a token parameter only shows up once decoded, where its value cannot be cut out, or whose percent escapes and HTML entities are still changing after 16 decodings, is replaced whole by `[redacted: the text carries a credential]`. Text that merely mentions the word (`tokenizer=python`, `?q=token`) is kept.
