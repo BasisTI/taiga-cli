@@ -105,6 +105,20 @@ func TestProbeTaskContract(t *testing.T) {
 	t2 := probeDo(t, c, "POST", "tasks", nil, map[string]any{"project": project, "user_story": s2.int("id"), "subject": "Beta " + suffix, "status": closed[0], "assigned_to": admin})
 	t3 := probeDo(t, c, "POST", "tasks", nil, map[string]any{"project": project, "subject": "Gamma loose " + suffix})
 	t.Logf("FINDING task without user_story: ref=%d user_story=%s", t3.int("ref"), t3["user_story"])
+
+	// Defaults of a minimal POST (subject and story only): what a task create without the
+	// optional flags produces, which the recovery of a lost answer compares with.
+	proj := probeDo(t, c, "GET", fmt.Sprintf("projects/%d", project), nil, nil)
+	minimal := probeDo(t, c, "POST", "tasks", nil, map[string]any{"project": project, "user_story": s1.int("id"), "subject": "minimal " + suffix})
+	reread := probeDo(t, c, "GET", fmt.Sprintf("tasks/%d", minimal.int("id")), nil, nil)
+	t.Logf("FINDING minimal POST: description=%s tags=%s due_date=%s assigned_to=%s status=%d (project default_task_status=%d) is_blocked=%s blocked_note=%s milestone=%s version=%d (re-read %d) attachments=%s is_closed=%s",
+		reread["description"], reread["tags"], reread["due_date"], reread["assigned_to"], reread.int("status"), proj.int("default_task_status"),
+		reread["is_blocked"], reread["blocked_note"], reread["milestone"], minimal.int("version"), reread.int("version"), reread["attachments"], reread["is_closed"])
+	if string(reread["description"]) != `""` || string(reread["tags"]) != "[]" || string(reread["due_date"]) != "null" || string(reread["assigned_to"]) != "null" ||
+		proj.int("default_task_status") <= 0 || reread.int("status") != proj.int("default_task_status") || string(reread["is_blocked"]) != "false" ||
+		string(reread["blocked_note"]) != `""` || reread.int("version") != 1 || string(reread["attachments"]) != "[]" || string(reread["is_closed"]) != "false" {
+		t.Fatalf("minimal POST defaults: %v", reread)
+	}
 	_, err := c.Do(ctx, Request{Method: "POST", Path: "tasks", Body: map[string]any{"project": other, "user_story": s1.int("id"), "subject": "cross"}})
 	t.Logf("FINDING POST task in another project with this project's story: %d %v", probeStatus(err), err)
 	if probeStatus(err) != 400 {
@@ -222,7 +236,7 @@ func TestProbeTaskContract(t *testing.T) {
 
 	// 8. by_ref with this project for a task ref of another project, and for a story ref here.
 	foreign := probeDo(t, c, "POST", "tasks", nil, map[string]any{"project": other, "subject": "foreign " + suffix})
-	for i := 0; i < 10 && foreign.int("ref") <= t3.int("ref"); i++ {
+	for i := 0; i < 10 && foreign.int("ref") <= minimal.int("ref"); i++ {
 		foreign = probeDo(t, c, "POST", "tasks", nil, map[string]any{"project": other, "subject": "foreign " + suffix})
 	}
 	_, err = c.Do(ctx, Request{Method: "GET", Path: "tasks/by_ref", Query: url.Values{"project": {fmt.Sprint(project)}, "ref": {fmt.Sprint(foreign.int("ref"))}}})

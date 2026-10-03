@@ -256,7 +256,7 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == "GET" && (path == "projects/37" || path == "projects/by_slug" && q.Get("slug") == f.slug):
-		f.write(w, map[string]any{"id": 37, "slug": f.slug, "default_swimlane": f.defaultSwimlane})
+		f.write(w, map[string]any{"id": 37, "slug": f.slug, "default_swimlane": f.defaultSwimlane, "default_task_status": 11})
 	case r.Method == "GET" && path == "swimlanes" && project():
 		f.list(w, r, f.swimlanes)
 	case r.Method == "GET" && path == "userstory-statuses" && project():
@@ -348,8 +348,11 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.nextID++
 		s := map[string]any{"id": f.nextID, "ref": 300, "project": 37, "version": 1, "tags": []any{}, "status": 1}
-		if path == "tasks" {
-			s["ref"], s["status"], s["owner"], s["is_closed"] = 301, 11, 5, false
+		if path == "tasks" { // the defaults the probe observed for a minimal POST
+			for k, v := range map[string]any{"ref": 301, "status": 11, "owner": 5, "is_closed": false, "description": "", "due_date": nil, "assigned_to": nil,
+				"is_blocked": false, "blocked_note": "", "milestone": nil, "attachments": []any{}} {
+				s[k] = v
+			}
 		}
 		for k, v := range body {
 			if k != "tags" && k != "project" {

@@ -106,12 +106,35 @@ func (s *Service) storyTasks(ctx context.Context, story Object) (map[int64]bool,
 	return ids, nil
 }
 
+// createdTask is the state a successful POST of body in story produces (docs/api-notes.md,
+// "Fase 3 — tasks"): the fields sent and, for those left out, the defaults a minimal POST showed
+// in the probe: empty description and tags, no due date, assignee or block, the story's sprint,
+// the project's default task status, no attachments, and version 1 (no write since). Without
+// the project's default task status an omitted status cannot be predicted: error.
+func (s *Service) createdTask(story, body Object) (Object, error) {
+	want := Object{"description": "", "tags": []string{}, "due_date": nil, "assigned_to": nil, "is_blocked": false, "blocked_note": "",
+		"milestone": story["milestone"], "attachments": []any{}, "version": 1}
+	if _, sent := body["status"]; !sent {
+		if ID(s.Project["default_task_status"]) <= 0 {
+			return nil, fmt.Errorf("the project's default task status is unknown, so the status a task gets without --status cannot be compared")
+		}
+		want["status"] = s.Project["default_task_status"]
+	}
+	for k, v := range body {
+		if k != "project" {
+			want[k] = v
+		}
+	}
+	return want, nil
+}
+
 // findTask looks for the task of a POST whose outcome is unknown: a task of story, owned by me,
 // with the subject sent, that was not in known (read right before the POST). The only such task
-// is the result when, read in full, it holds every field sent; that is a match, not a proof
-// (another process of the same account may have created an identical task meanwhile), so a
-// warning says so. Any other case is task_create_unconfirmed, naming the candidates for
-// inspection.
+// is the result when, read in full, its state is exactly the one the requested creation would
+// produce (createdTask), defaults of the omitted fields included; that is a match, not a proof
+// of identity (another process of the same account may have created an identical task
+// meanwhile), so a warning says so. Any other case is task_create_unconfirmed, naming the
+// candidates for inspection.
 func (s *Service) findTask(ctx context.Context, story, me, body Object, known map[int64]bool, sendErr error) (Object, error) {
 	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
 	defer cancel()
@@ -136,19 +159,18 @@ func (s *Service) findTask(ctx context.Context, story, me, body Object, known ma
 				checked = fmt.Sprintf("the story has one new task of this account with this subject, #%v (id %d), but it could not be read to compare: %s", ref, id, output.AsError(err).Error())
 				break
 			}
-			sent := Object{}
-			for k, v := range body {
-				if k != "project" {
-					sent[k] = v
-				}
+			want, err := s.createdTask(story, body)
+			if err != nil {
+				checked = fmt.Sprintf("the story has one new task of this account with this subject, #%v (id %d), but it cannot be compared: %v", ref, id, err)
+				break
 			}
-			if diff := differences(full, sent); len(diff) > 0 {
-				checked = fmt.Sprintf("the story has one new task of this account with this subject, #%v (id %d), but its %s differ from the request: it may belong to another process", ref, id, strings.Join(diff, ", "))
+			if diff := differences(full, want); len(diff) > 0 {
+				checked = fmt.Sprintf("the story has one new task of this account with this subject, #%v (id %d), but its %s differ from what this creation would produce: it may belong to another process", ref, id, strings.Join(diff, ", "))
 				break
 			}
 			s.Warnings = append(s.Warnings, Warning{Code: "task_create_matched", Message: fmt.Sprintf(
-				"the POST answer was lost (%v); task #%v is the story's only new task of this account and holds every field sent, so it is taken as the one created. "+
-					"This is a match, not a proof: another process using the same account could have created an identical task", sendErr, ref)})
+				"the POST answer was lost (%v); task #%v is the story's only new task of this account and its state is exactly what this creation would produce, so it is taken as the one created. "+
+					"This is a match, not a proof of identity: another process using the same account could have created the same task", sendErr, ref)})
 			return s.TaskView(full)
 		case 0:
 			checked = "the story has no new task with this subject yet, but the request may still be running on the server"

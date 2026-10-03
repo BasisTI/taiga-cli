@@ -64,7 +64,7 @@ func (f *taskAPI) Do(_ context.Context, r taiga.Request) (*taiga.Response, error
 	f.requests = append(f.requests, r)
 	switch {
 	case r.Method == "GET" && r.Path == "projects/by_slug":
-		return answer(Object{"id": 37, "slug": "infra"})
+		return answer(f.project())
 	case r.Method == "GET" && r.Path == "users/me":
 		return answer(Object{"id": 5, "username": "admin"})
 	case r.Method == "GET" && r.Path == "tasks/by_ref":
@@ -88,8 +88,10 @@ func (f *taskAPI) Do(_ context.Context, r taiga.Request) (*taiga.Response, error
 		body := r.Body.(Object)
 		if f.postErr == nil || f.postApplied {
 			f.nextID++
+			// The defaults the probe observed for a minimal POST.
 			t := Object{"id": json.Number(fmt.Sprint(f.nextID)), "ref": json.Number("300"), "project": json.Number("37"), "version": json.Number("1"),
-				"owner": json.Number("5"), "tags": []any{}, "is_closed": false}
+				"owner": json.Number("5"), "tags": []any{}, "is_closed": false, "description": "", "due_date": nil, "assigned_to": nil,
+				"status": json.Number("11"), "is_blocked": false, "blocked_note": "", "milestone": nil, "attachments": []any{}}
 			for k, v := range body {
 				if k != "project" {
 					t[k] = jsonValue(v)
@@ -124,6 +126,11 @@ func jsonValue(v any) any {
 func answer(o Object) (*taiga.Response, error) {
 	b, err := json.Marshal(o)
 	return &taiga.Response{Status: 200, Body: b}, err
+}
+
+// project is the project answer, with the default task status the recovery of a create needs.
+func (f *taskAPI) project() Object {
+	return Object{"id": 37, "slug": "infra", "default_task_status": 11}
 }
 
 func (f *taskAPI) GetAll(_ context.Context, path string, q url.Values) ([]json.RawMessage, error) {
@@ -523,7 +530,8 @@ func another(f *taskAPI, fields Object) func() {
 	return func() {
 		o := Object{"id": json.Number("9999"), "ref": json.Number("301"), "project": json.Number("37"), "version": json.Number("1"),
 			"subject": "Nova", "description": "", "user_story": json.Number("6808"), "owner": json.Number("5"), "tags": []any{},
-			"status": json.Number("11"), "assigned_to": nil, "due_date": nil}
+			"status": json.Number("11"), "assigned_to": nil, "due_date": nil, "is_closed": false, "is_blocked": false, "blocked_note": "",
+			"milestone": nil, "attachments": []any{}}
 		for k, v := range fields {
 			o[k] = v
 		}
@@ -583,5 +591,78 @@ func TestCreateTaskUncertainOutcomeUnreadableCandidateIsUnconfirmed(t *testing.T
 	_, err := s.CreateTask(context.Background(), story6808(), Object{"subject": "Nova"}, false)
 	if e := output.AsError(err); e.Code != "task_create_unconfirmed" || !strings.Contains(e.Cause, "#300") {
 		t.Fatalf("%#v", e)
+	}
+}
+
+// A minimal request (subject only) and a task of another process with a field the request did
+// not send: the candidate must equal what the server would create, defaults included.
+func TestCreateTaskUncertainOutcomeComparesTheDefaultsOfOmittedFields(t *testing.T) {
+	for name, theirs := range map[string]Object{
+		"status":       {"status": json.Number("13"), "is_closed": true},
+		"description":  {"description": "other process"},
+		"tags":         {"tags": []any{[]any{"other-process", nil}}},
+		"due_date":     {"due_date": "2026-12-31"},
+		"assigned_to":  {"assigned_to": json.Number("5")},
+		"is_blocked":   {"is_blocked": true, "blocked_note": "theirs"},
+		"milestone":    {"milestone": json.Number("4")},
+		"version":      {"version": json.Number("2")},
+		"attachments":  {"attachments": []any{map[string]any{"id": 1}}},
+		"blocked_note": {"blocked_note": "stale"},
+	} {
+		for _, sendErr := range []error{gateway, redirect, lost} {
+			f, s := newTaskAPI(t)
+			f.postErr = sendErr
+			f.onPostSent = another(f, theirs)
+			_, err := s.CreateTask(context.Background(), story6808(), Object{"subject": "Nova"}, false)
+			if err == nil {
+				t.Errorf("%s %v: adopted the candidate", name, sendErr)
+				continue
+			}
+			e := output.AsError(err)
+			if e.Code != "task_create_unconfirmed" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Cause, "#301") || !strings.Contains(e.Cause, name) || len(s.Warnings) != 0 {
+				t.Errorf("%s %v: %#v warnings %v", name, sendErr, e, s.Warnings)
+			}
+		}
+	}
+}
+
+// The same minimal request and a candidate with every default: taken, with the warning.
+func TestCreateTaskUncertainOutcomeMinimalRequestMatchesTheDefaults(t *testing.T) {
+	f, s := newTaskAPI(t)
+	f.postErr = gateway
+	f.onPostSent = another(f, nil)
+	got, err := s.CreateTask(context.Background(), story6808(), Object{"subject": "Nova"}, false)
+	if err != nil || fmt.Sprint(got.(Object)["id"]) != "9999" || len(s.Warnings) != 1 {
+		t.Fatalf("%v %v %v", got, err, s.Warnings)
+	}
+}
+
+// Without the project's default task status, an omitted status cannot be compared: unconfirmed.
+func TestCreateTaskUncertainOutcomeUnknownDefaultStatusIsUnconfirmed(t *testing.T) {
+	f, s := newTaskAPI(t)
+	delete(s.Project, "default_task_status")
+	f.postErr, f.postApplied = gateway, true
+	_, err := s.CreateTask(context.Background(), story6808(), Object{"subject": "Nova"}, false)
+	if err == nil || codeOf(err) != "task_create_unconfirmed" || !strings.Contains(output.AsError(err).Cause, "default task status") {
+		t.Fatalf("%v", err)
+	}
+	// With the status sent, the default is not needed.
+	f, s = newTaskAPI(t)
+	delete(s.Project, "default_task_status")
+	f.postErr, f.postApplied = gateway, true
+	if _, err := s.CreateTask(context.Background(), story6808(), Object{"subject": "Nova", "status": json.Number("12")}, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The story's sprint is the task's (probe): a story in a sprint expects it on the candidate.
+func TestCreateTaskUncertainOutcomeExpectsTheStorySprint(t *testing.T) {
+	f, s := newTaskAPI(t)
+	f.postErr = gateway
+	f.onPostSent = another(f, nil) // milestone null
+	story := story6808()
+	story["milestone"] = json.Number("4")
+	if _, err := s.CreateTask(context.Background(), story, Object{"subject": "Nova"}, false); codeOf(err) != "task_create_unconfirmed" || !strings.Contains(output.AsError(err).Cause, "milestone") {
+		t.Fatalf("%v", err)
 	}
 }
