@@ -192,7 +192,7 @@ func (s *Service) Write(ctx context.Context, k kind, path string, before, patch 
 	}
 	resp, err := s.send(ctx, k, path, before, patch, force)
 	if err != nil && k.confirmUncertain && uncertain(err) {
-		return s.confirmPatch(ctx, k, path, before, patch, err)
+		return s.confirmPatch(ctx, k, path, patch, err, fmt.Sprintf("`taiga %s get %v`", k.name, before["ref"]))
 	}
 	if err != nil {
 		return nil, taiga.ToOutput(err)
@@ -222,23 +222,34 @@ func uncertain(err error) bool {
 	return !taiga.NotSent(err) && (unknownOutcome(err) || errors.As(err, &ae) && ae.Status >= 300 && ae.Status < 400)
 }
 
+// unsure is a failed write whose outcome the kind decides by checking: for a task, any uncertain
+// one; for a story, a network error after the connection opened or a 5xx (a 3xx stays an error
+// until US #274).
+func (k kind) unsure(err error) bool {
+	if k.confirmUncertain {
+		return uncertain(err)
+	}
+	return !taiga.NotSent(err) && unknownOutcome(err)
+}
+
 // confirmPatch decides a PATCH whose outcome is unknown by re-reading the resource: when every
 // field sent shows the value asked for, the write landed (they all differed before it).
 // Otherwise <kind>_update_unconfirmed, exit 1: a request still running on the server can land
-// after the check, and a re-run would repeat a merge like --append-description.
-func (s *Service) confirmPatch(ctx context.Context, k kind, path string, before, patch Object, sendErr error) (Object, error) {
-	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
+// after the check, and a re-run would repeat a merge like --append-description. check is the
+// command that shows the resource, for the recovery.
+func (s *Service) confirmPatch(ctx context.Context, k kind, path string, patch Object, sendErr error, check string) (Object, error) {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
 	defer cancel()
-	now, err := Read(check, s.API, path, nil)
-	checked := fmt.Sprintf("the %s does not show the change, but the request may still be running on the server", k.name)
+	now, err := Read(rctx, s.API, path, nil)
+	checked := "the re-read does not show the change, but the request may still be running on the server"
 	if err != nil {
-		checked = fmt.Sprintf("the %s could not be read to check: %s", k.name, output.AsError(err).Error())
+		checked = "the re-read to check failed: " + output.AsError(err).Error()
 	} else if shows(now, patch) {
 		return now, nil
 	}
 	return nil, &output.Error{Code: k.name + "_update_unconfirmed", Source: taiga.ToOutput(sendErr).Source, Stage: "PATCH " + path,
 		Cause:    fmt.Sprintf("the change may have been applied: PATCH %s failed (%v) and %s", path, sendErr, checked),
-		Recovery: fmt.Sprintf("do not re-run the command blindly: wait, check with `taiga %s get %v` and repeat only what is still missing", k.name, before["ref"]),
+		Recovery: "do not re-run the command blindly: wait, check with " + check + " and repeat only what is still missing",
 		Exit:     output.ExitUnexpected}
 }
 

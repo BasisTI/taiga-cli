@@ -31,7 +31,7 @@ func tagNames(flag string, tags []string) ([]string, error) {
 
 func (a *App) storyCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "story", Short: "Read and update user stories"}
-	cmd.AddCommand(a.storyListCmd(), a.storyGetCmd(), a.storyWriteCmd(false), a.storyWriteCmd(true), a.storyCloseCmd(), a.storyFieldCmd(), a.storyCommentCmd(), a.storyCommentsCmd())
+	cmd.AddCommand(a.storyListCmd(), a.storyGetCmd(), a.storyWriteCmd(false), a.storyWriteCmd(true), a.storyCloseCmd(), a.fieldValuesCmd("story"), a.commentCmd("story"), a.commentsCmd("story"))
 	return cmd
 }
 

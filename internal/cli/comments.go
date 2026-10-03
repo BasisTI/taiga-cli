@@ -9,12 +9,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func (a *App) storyCommentCmd() *cobra.Command {
+// commentCmd publishes a comment on a story or task (kind).
+func (a *App) commentCmd(kind string) *cobra.Command {
 	var body, file string
 	var dry bool
-	cmd := &cobra.Command{Use: "comment REF", Short: "Publish a comment on a story", Args: cobra.ExactArgs(1),
-		Long: "Publish a comment on a story. The comment is sent once and never repeated: if the answer is lost,\n" +
-			"the story history says whether it was published."}
+	cmd := &cobra.Command{Use: "comment REF", Short: "Publish a comment on a " + kind, Args: cobra.ExactArgs(1),
+		Long: "Publish a comment on a " + kind + ". The comment is sent once and never repeated: if the answer is lost,\n" +
+			"the " + kind + " history says whether it was published."}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if err := validRef(args[0]); err != nil {
 			return err
@@ -38,7 +39,7 @@ func (a *App) storyCommentCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		result, err := service.Comment(cmd.Context(), args[0], body, dry)
+		result, err := service.Comment(cmd.Context(), kind, args[0], body, dry)
 		if err != nil {
 			return err
 		}
@@ -50,10 +51,11 @@ func (a *App) storyCommentCmd() *cobra.Command {
 	return cmd
 }
 
-func (a *App) storyCommentsCmd() *cobra.Command {
+// commentsCmd lists the comments of a story or task (kind).
+func (a *App) commentsCmd(kind string) *cobra.Command {
 	var include bool
-	cmd := &cobra.Command{Use: "comments REF", Short: "List the comments of a story, newest first", Args: cobra.ExactArgs(1),
-		Long: "List the comments of a story, newest first. Comments written by Taiga's GitLab integration are\n" +
+	cmd := &cobra.Command{Use: "comments REF", Short: "List the comments of a " + kind + ", newest first", Args: cobra.ExactArgs(1),
+		Long: "List the comments of a " + kind + ", newest first. Comments written by Taiga's GitLab integration are\n" +
 			"hidden unless --include-system; comments of any other author are always listed."}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if err := validRef(args[0]); err != nil {
@@ -63,7 +65,7 @@ func (a *App) storyCommentsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		items, err := service.Comments(cmd.Context(), args[0], include)
+		items, err := service.Comments(cmd.Context(), kind, args[0], include)
 		if err != nil {
 			return err
 		}

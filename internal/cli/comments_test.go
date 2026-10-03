@@ -32,15 +32,15 @@ func commentFake(t *testing.T) (*storyFake, *[]recorded) {
 	return f, calls
 }
 
-// handleComments serves history/userstory/<id> and the PATCH of a comment. Taiga accepts a
+// handleComments serves history/userstory/<id> and history/task/<id> and the PATCH of a comment. Taiga accepts a
 // comment with any version up to the current one (docs/api-notes.md); commentStatus answers
 // the PATCH with that status instead, after storing the comment when commentApplied.
 func (f *storyFake) handleComments(w http.ResponseWriter, r *http.Request, path string) bool {
 	if f.history == nil {
 		return false
 	}
-	if r.Method == "GET" && strings.HasPrefix(path, "history/userstory/") {
-		id, _ := strconv.ParseInt(strings.TrimPrefix(path, "history/userstory/"), 10, 64)
+	if r.Method == "GET" && (strings.HasPrefix(path, "history/userstory/") || strings.HasPrefix(path, "history/task/")) {
+		id, _ := strconv.ParseInt(path[strings.LastIndex(path, "/")+1:], 10, 64)
 		entries, ok := f.history[id]
 		if !ok {
 			w.WriteHeader(404)
@@ -52,7 +52,7 @@ func (f *storyFake) handleComments(w http.ResponseWriter, r *http.Request, path 
 		}
 		return true
 	}
-	if r.Method != "PATCH" || !strings.HasPrefix(path, "userstories/") {
+	if r.Method != "PATCH" || f.store(head(path)) == nil {
 		return false
 	}
 	b, _ := io.ReadAll(r.Body)
@@ -63,8 +63,8 @@ func (f *storyFake) handleComments(w http.ResponseWriter, r *http.Request, path 
 	if !ok {
 		return false
 	}
-	id, _ := strconv.ParseInt(strings.TrimPrefix(path, "userstories/"), 10, 64)
-	s := f.stories[id]
+	id, _ := strconv.ParseInt(tail(path), 10, 64)
+	s := f.store(head(path))[id]
 	if v, _ := strconv.Atoi(fmt.Sprint(body["version"])); v < 1 || v > s["version"].(int) {
 		w.WriteHeader(400)
 		_, _ = fmt.Fprint(w, `{"version":"The version parameter is not valid"}`)

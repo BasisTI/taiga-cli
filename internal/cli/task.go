@@ -17,7 +17,7 @@ func (a *App) renderTask(v any) error { return a.renderKeys(v, taskTextKeys) }
 
 func (a *App) taskCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "task", Short: "Read and update tasks"}
-	cmd.AddCommand(a.taskListCmd(), a.taskGetCmd(), a.taskWriteCmd(false), a.taskWriteCmd(true), a.taskCloseCmd())
+	cmd.AddCommand(a.taskListCmd(), a.taskGetCmd(), a.taskWriteCmd(false), a.taskWriteCmd(true), a.taskCloseCmd(), a.fieldValuesCmd("task"), a.commentCmd("task"), a.commentsCmd("task"))
 	return cmd
 }
 

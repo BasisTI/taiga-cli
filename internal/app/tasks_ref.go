@@ -28,6 +28,34 @@ var (
 	taskKind  = kind{name: "task", base: "tasks", web: "task", statuses: "task-statuses", history: "task", confirmUncertain: true}
 )
 
+func kindOf(name string) (kind, error) {
+	switch name {
+	case "story":
+		return storyKind, nil
+	case "task":
+		return taskKind, nil
+	}
+	return kind{}, Usage("kind must be story or task")
+}
+
+// Item reads a story or task (name) of the selected project by ref.
+func (s *Service) Item(ctx context.Context, name, ref string) (Object, error) {
+	k, err := kindOf(name)
+	if err != nil {
+		return nil, err
+	}
+	return s.byRef(ctx, k.base, k.name, ref, 0)
+}
+
+// View is the output form of a story or task (name).
+func (s *Service) View(name string, o Object) (Object, error) {
+	k, err := kindOf(name)
+	if err != nil {
+		return nil, err
+	}
+	return s.view(k, o)
+}
+
 // Task reads a task of the selected project by ref (tasks/by_ref) or by id.
 func (s *Service) Task(ctx context.Context, ref string, id int64) (Object, error) {
 	return s.byRef(ctx, "tasks", "task", ref, id)

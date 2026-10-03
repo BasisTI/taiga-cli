@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -167,5 +168,85 @@ func TestIntegrationTaskLostAnswers(t *testing.T) {
 	}
 	if got := storyJSON(t, env, "", "task", "get", ref)["description"]; got != "uma vez" {
 		t.Fatalf("description: %q", got)
+	}
+}
+
+// truncateAnswer is a proxy to the local Taiga that forwards everything and cuts the answer of
+// each PATCH to path after a few bytes (the connection drops mid-body after the 2xx).
+func truncateAnswer(t *testing.T, env map[string]string, path string) (map[string]string, *int) {
+	t.Helper()
+	patches := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		req, _ := http.NewRequest(r.Method, testtaiga.URL()+r.URL.RequestURI(), bytes.NewReader(body))
+		req.Header = r.Header.Clone()
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Errorf("forward: %v", err)
+			w.WriteHeader(502)
+			return
+		}
+		answer, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", fmt.Sprint(len(answer)))
+		w.WriteHeader(resp.StatusCode)
+		if r.Method == "PATCH" && r.URL.Path == "/api/v1/"+path {
+			patches++
+			_, _ = w.Write(answer[:10])
+			return
+		}
+		_, _ = w.Write(answer)
+	}))
+	t.Cleanup(srv.Close)
+	out := map[string]string{}
+	for k, v := range env {
+		out[k] = v
+	}
+	out["TAIGA_URL"] = srv.URL
+	return out, &patches
+}
+
+func TestIntegrationTaskFieldsAndComments(t *testing.T) {
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	env, svc, _ := freshProject(t, "cli-test-tasks-fields-"+suffix)
+	story := fmt.Sprint(storyJSON(t, env, "", "story", "create", "--subject", "story")["ref"])
+	task := storyJSON(t, env, "", "task", "create", "--story", story, "--subject", "task "+suffix)
+	ref := fmt.Sprint(task["ref"])
+	hours := storyJSON(t, env, "", "field", "create", "--kind", "task", "--name", "Horas", "--type", "text")
+	due := storyJSON(t, env, "", "field", "create", "--kind", "task", "--name", "Prazo", "--type", "date")
+
+	set := storyJSON(t, env, "", "task", "field", "set", ref, "Horas=8h", "Prazo=2026-12-31")
+	got := set["attributes_values"].(map[string]any)
+	if got[fmt.Sprint(hours["id"])] != "8h" || got[fmt.Sprint(due["id"])] != "2026-12-31" || set["version"] != float64(2) || !strings.HasSuffix(fmt.Sprint(set["url"]), "/task/"+ref) {
+		t.Fatalf("set: %v", set)
+	}
+	cleared := storyJSON(t, env, "", "task", "field", "set", ref, "--unset", "Prazo")
+	if got := cleared["attributes_values"].(map[string]any); got[fmt.Sprint(due["id"])] != nil || got[fmt.Sprint(hours["id"])] != "8h" {
+		t.Fatalf("unset: %v", cleared)
+	}
+	if listed := storyJSON(t, env, "", "task", "field", "list", ref); listed["version"] != cleared["version"] {
+		t.Fatalf("list: %v", listed)
+	}
+	// The answer of the values PATCH is cut after the 2xx: the re-read stands in.
+	proxied, patches := truncateAnswer(t, env, fmt.Sprintf("tasks/custom-attributes-values/%v", task["id"]))
+	truncated := storyJSON(t, proxied, "", "task", "field", "set", ref, "Horas=9h")
+	if got := truncated["attributes_values"].(map[string]any); got[fmt.Sprint(hours["id"])] != "9h" || *patches != 1 {
+		t.Fatalf("truncated: %v, %d PATCH", truncated, *patches)
+	}
+
+	// Comments: svc and admin, newest first, on history/task.
+	storyJSON(t, svc, "", "task", "comment", ref, "--body", "primeiro "+suffix)
+	storyJSON(t, env, "body: \"x\"\nção\n", "task", "comment", ref, "--body-file", "-")
+	out, errOut, code := runIn(t, env, "", "task", "comments", ref)
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(out), &items); err != nil || code != 0 || len(items) != 2 {
+		t.Fatalf("comments: %d %s %s", code, out, errOut)
+	}
+	if items[0]["comment"] != "body: \"x\"\nção\n" || items[1]["comment"] != "primeiro "+suffix || fmt.Sprint(items[0]["task_ref"]) != ref {
+		t.Fatalf("comments: %v", items)
+	}
+	if author, _ := items[1]["user"].(map[string]any); author["username"] != testtaiga.ServiceUser {
+		t.Fatalf("author: %v", items[1]["user"])
 	}
 }

@@ -111,6 +111,10 @@ func (f *storyFake) handleValues(w http.ResponseWriter, r *http.Request, path st
 	if f.onPatchValues != nil {
 		f.onPatchValues(v)
 	}
+	if f.valuesStatus != 0 {
+		w.WriteHeader(f.valuesStatus)
+		return
+	}
 	if f.truncate {
 		cut(w, 200)
 		return

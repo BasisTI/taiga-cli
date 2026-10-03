@@ -45,6 +45,10 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 			e["user"] = user()
 			e["comment"] = "comment " + sweepURL
 		}
+		f.history[9100] = []map[string]any{{"id": "t1", "type": 1, "created_at": "2026-10-03T12:00:00.000Z", "comment": "task comment " + sweepURL, "user": user(),
+			"diff": map[string]any{}, "delete_comment_date": nil, "edit_comment_date": nil}}
+		f.defs["task-custom-attributes"][0]["description"] = sweepURL
+		f.values["tasks/custom-attributes-values/9100"]["attributes_values"] = map[string]any{"27": sweepURL}
 		f.defs["userstory-custom-attributes"][2]["description"] = sweepURL
 		f.values[values6808]["attributes_values"] = map[string]any{"29": sweepURL}
 		return f, f.env()
@@ -82,6 +86,8 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 		{"task", "create", "--story", "246", "--subject", "s " + sweepURL}, {"task", "create", "--story", "246", "--subject", "s " + sweepURL, "--dry-run"},
 		{"task", "update", "250", "--subject", "s"}, {"task", "update", "250", "--append-description", sweepURL, "--dry-run"},
 		{"task", "update", "250", "--block", sweepURL},
+		{"task", "field", "list", "250"}, {"task", "field", "set", "250", "Horas=x"}, {"task", "field", "set", "250", "Horas=" + sweepURL, "--dry-run"},
+		{"task", "comments", "250"}, {"task", "comment", "250", "--body", sweepURL}, {"task", "comment", "250", "--body", sweepURL, "--dry-run"},
 	} {
 		cases = append(cases, struct {
 			env   func() map[string]string
@@ -108,6 +114,8 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 		{failing("POST tasks", 403), []string{"task", "create", "--story", "246", "--subject", "s"}},
 		{failing("PATCH tasks/9100", 502), []string{"task", "update", "250", "--append-description", "x"}},
 		{failing("PATCH tasks/9100", 302), []string{"task", "close", "250"}},
+		{failing("PATCH tasks/9100", 502), []string{"task", "comment", "250", "--body", "x"}},
+		{failing("PATCH tasks/custom-attributes-values/9100", 502), []string{"task", "field", "set", "250", "Horas=y"}},
 	} {
 		cases = append(cases, struct {
 			env   func() map[string]string
@@ -132,7 +140,8 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 	}
 	for _, args := range [][]string{{"project", "get"}, {"story", "get", "246"}, {"auth", "status"}, {"epic", "link", "9", "246"},
 		{"story", "update", "246", "--epic", "9"}, {"story", "create", "--subject", "s", "--epic", "9"},
-		{"task", "get", "250"}, {"task", "list"}, {"task", "create", "--story", "246", "--subject", "s"}, {"task", "update", "250", "--subject", "s"}} {
+		{"task", "get", "250"}, {"task", "list"}, {"task", "create", "--story", "246", "--subject", "s"}, {"task", "update", "250", "--subject", "s"},
+		{"task", "field", "list", "250"}, {"task", "comments", "250"}, {"task", "comment", "250", "--body", "x"}} {
 		cases = append(cases, struct {
 			env   func() map[string]string
 			stdin string

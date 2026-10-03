@@ -120,6 +120,8 @@ type storyFake struct {
 	onPatchValues func(v map[string]any)
 	// badValuesWrite makes a successful values PATCH answer with a body that is not JSON.
 	badValuesWrite bool
+	// valuesStatus answers a values PATCH, after applying it, with this status and no body.
+	valuesStatus int
 	// truncate makes a successful write answer cut short after the status line (the connection
 	// drops mid-body), for every write.
 	truncate bool
