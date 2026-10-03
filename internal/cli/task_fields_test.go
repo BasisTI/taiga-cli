@@ -106,3 +106,28 @@ func TestTaskCommentLostAnswer(t *testing.T) {
 		}
 	}
 }
+
+// Taiga has no OCC on the values resource: a re-read that shows our dictionary after an
+// uncertain PATCH is not enough, the version must be the next one (another write may be lost).
+func TestTaskFieldSetLostAnswerNextToAnotherWriteIsNotSuccess(t *testing.T) {
+	f, calls := fieldFake(t)
+	f.valuesStatus = 502
+	f.onPatchValues = func(v map[string]any) {
+		if v["task"] == 9100 {
+			v["version"] = v["version"].(int) + 1 // another write landed next to ours
+		}
+	}
+	_, stderr, code := runIn(t, f.env(), "", "task", "field", "set", "250", "Horas=8h")
+	if code != 1 || !strings.Contains(stderr, "task_update_unconfirmed") || !strings.Contains(stderr, "another write") || len(writes(calls)) != 1 {
+		t.Fatalf("%d %s", code, stderr)
+	}
+}
+
+func TestTaskCommentTextShowsTheTaskSummary(t *testing.T) {
+	f, _ := commentFake(t)
+	f.history[9100] = []map[string]any{}
+	out, stderr, code := runIn(t, f.env(), "", "task", "comment", "250", "--body", "feito", "--output", "text")
+	if code != 0 || !strings.Contains(out, "user_story:") || strings.Contains(out, "assigned_users") {
+		t.Fatalf("%d %s %s", code, out, stderr)
+	}
+}

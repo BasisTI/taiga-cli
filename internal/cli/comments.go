@@ -43,6 +43,9 @@ func (a *App) commentCmd(kind string) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if kind == "task" {
+			return a.renderTask(result)
+		}
 		return a.renderCurated(result)
 	}
 	cmd.Flags().StringVar(&body, "body", "", "comment text (Markdown)")

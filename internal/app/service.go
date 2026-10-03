@@ -192,7 +192,7 @@ func (s *Service) Write(ctx context.Context, k kind, path string, before, patch 
 	}
 	resp, err := s.send(ctx, k, path, before, patch, force)
 	if err != nil && k.confirmUncertain && uncertain(err) {
-		return s.confirmPatch(ctx, k, path, patch, err, fmt.Sprintf("`taiga %s get %v`", k.name, before["ref"]))
+		return s.confirmPatch(ctx, k, path, patch, 0, err, fmt.Sprintf("`taiga %s get %v`", k.name, before["ref"]))
 	}
 	if err != nil {
 		return nil, taiga.ToOutput(err)
@@ -235,9 +235,11 @@ func (k kind) unsure(err error) bool {
 // confirmPatch decides a PATCH whose outcome is unknown by re-reading the resource: when every
 // field sent shows the value asked for, the write landed (they all differed before it).
 // Otherwise <kind>_update_unconfirmed, exit 1: a request still running on the server can land
-// after the check, and a re-run would repeat a merge like --append-description. check is the
-// command that shows the resource, for the recovery.
-func (s *Service) confirmPatch(ctx context.Context, k kind, path string, patch Object, sendErr error, check string) (Object, error) {
+// after the check, and a re-run would repeat a merge like --append-description. A resource
+// without OCC passes version, the next version of the read the patch came from: any other
+// version means another write landed next to ours, which a matching re-read cannot rule out.
+// check is the command that shows the resource, for the recovery.
+func (s *Service) confirmPatch(ctx context.Context, k kind, path string, patch Object, version int64, sendErr error, check string) (Object, error) {
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
 	defer cancel()
 	now, err := Read(rctx, s.API, path, nil)
@@ -245,7 +247,10 @@ func (s *Service) confirmPatch(ctx context.Context, k kind, path string, patch O
 	if err != nil {
 		checked = "the re-read to check failed: " + output.AsError(err).Error()
 	} else if shows(now, patch) {
-		return now, nil
+		if version == 0 || ID(now["version"]) == version {
+			return now, nil
+		}
+		checked = fmt.Sprintf("the re-read shows the values sent, but with version %v instead of %d: another write landed next to it and may have been overwritten", now["version"], version)
 	}
 	return nil, &output.Error{Code: k.name + "_update_unconfirmed", Source: taiga.ToOutput(sendErr).Source, Stage: "PATCH " + path,
 		Cause:    fmt.Sprintf("the change may have been applied: PATCH %s failed (%v) and %s", path, sendErr, checked),
