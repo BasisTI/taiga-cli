@@ -65,13 +65,6 @@ func (f *storyFake) handleFields(w http.ResponseWriter, r *http.Request, path st
 		f.write(w, d)
 	case strings.HasPrefix(path, "userstories/custom-attributes-values/") || strings.HasPrefix(path, "tasks/custom-attributes-values/"):
 		f.handleValues(w, r, path)
-	case head == "tasks" && r.Method == "GET":
-		id, _ := strconv.ParseInt(tail, 10, 64)
-		if t, ok := f.tasks[id]; ok {
-			f.write(w, t)
-			return true
-		}
-		w.WriteHeader(404)
 	default:
 		return false
 	}

@@ -6,6 +6,28 @@ import (
 	"net/url"
 )
 
+// kind is what stories and tasks differ in, for the code they share.
+type kind struct {
+	name     string // story or task: command and message names
+	base     string // the API resource
+	web      string // the path segment of the web URL
+	statuses string // the status catalog
+	history  string // the history resource
+	// fenceAssignees: Taiga's OCC never sees a story's assigned_to (docs/api-notes.md), so a
+	// story write that changes assignees is fenced (writeAssignees); a task's assigned_to is in
+	// its history diff and the per-field OCC protects it.
+	fenceAssignees bool
+	// confirmUncertain: a PATCH whose outcome is unknown (network after the connection opened,
+	// 5xx or 3xx) is decided by a re-read, never a repeatable exit 7. Stories keep the phase 2
+	// behaviour until US #274.
+	confirmUncertain bool
+}
+
+var (
+	storyKind = kind{name: "story", base: "userstories", web: "us", statuses: "userstory-statuses", history: "userstory", fenceAssignees: true}
+	taskKind  = kind{name: "task", base: "tasks", web: "task", statuses: "task-statuses", history: "task", confirmUncertain: true}
+)
+
 // Task reads a task of the selected project by ref (tasks/by_ref) or by id.
 func (s *Service) Task(ctx context.Context, ref string, id int64) (Object, error) {
 	return s.byRef(ctx, "tasks", "task", ref, id)
