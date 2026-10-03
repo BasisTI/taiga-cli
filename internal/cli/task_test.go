@@ -238,3 +238,18 @@ func TestTaskCloseOnlyChangesTheStatus(t *testing.T) {
 		t.Fatalf("open status: %d %s", code, stderr)
 	}
 }
+
+// A create confirmed by matching fields after a lost answer warns that the match is heuristic.
+func TestTaskCreateLostAnswerMatchedWarns(t *testing.T) {
+	for _, status := range []int{502, 302} {
+		f, calls := newStoryFake(t)
+		f.postStatus = status
+		out, stderr, code := runIn(t, f.env(), "", "task", "create", "--story", "246", "--subject", "Nova", "--tag", "x")
+		if code != 0 || !strings.Contains(out, `"ref": 301`) || !strings.Contains(stderr, "warning [task_create_matched]") || len(writes(calls)) != 1 {
+			t.Fatalf("%d: %d %s %s", status, code, out, stderr)
+		}
+		if strings.Contains(stderr, "\n\n") || strings.Count(stderr, "\n") != 1 {
+			t.Fatalf("%d: the warning must be one line: %q", status, stderr)
+		}
+	}
+}

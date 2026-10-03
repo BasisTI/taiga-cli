@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"sort"
 	"strconv"
 
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -35,7 +36,12 @@ type Service struct {
 	API      API
 	Project  Object
 	catalogs map[string][]Object
+	// Warnings are printed on stderr after a successful command: things the result does not show.
+	Warnings []Warning
 }
+
+// Warning is a note about a successful result, for the caller to print.
+type Warning struct{ Code, Message string }
 
 func Decode(b []byte) (Object, error) {
 	var out Object
@@ -259,21 +265,28 @@ func (s *Service) confirmPatch(ctx context.Context, k kind, path string, patch O
 }
 
 // shows reports whether o holds every field of patch with the value sent (tags by name).
-func shows(o, patch Object) bool {
+func shows(o, patch Object) bool { return len(differences(o, patch)) == 0 }
+
+// differences lists, sorted, the fields of patch that o does not hold with the value sent.
+// Tags compare by name, as Taiga stores them (the CLI already sends them in lower case).
+func differences(o, patch Object) []string {
+	out := []string{}
 	for key, want := range patch {
 		got := o[key]
 		if key == "tags" {
 			names, err := Names(got)
 			if err != nil {
-				return false
+				out = append(out, key)
+				continue
 			}
 			got = names
 		}
 		if _, ok := o[key]; !ok || !equal(got, want) {
-			return false
+			out = append(out, key)
 		}
 	}
-	return true
+	sort.Strings(out)
+	return out
 }
 
 // applied gives write_applied the recovery of the kind: the generic one names stories.

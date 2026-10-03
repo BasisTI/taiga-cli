@@ -199,7 +199,11 @@ func (s *Service) writeValues(ctx context.Context, k kind, path string, before, 
 	patch := Object{"attributes_values": merged}
 	resp, err := confirmed(s.API.Do(ctx, taiga.Request{Method: "PATCH", Path: path, Body: map[string]any{"attributes_values": merged, "version": before["version"]}}))
 	if err != nil && k.confirmUncertain && uncertain(err) {
-		return s.confirmPatch(ctx, k, path, patch, ID(before["version"])+1, err, check)
+		next := ID(before["version"]) + 1
+		if force {
+			next = 0 // --force-version skips the version check; the values are still compared
+		}
+		return s.confirmPatch(ctx, k, path, patch, next, err, check)
 	}
 	if err != nil {
 		var ae *taiga.APIError

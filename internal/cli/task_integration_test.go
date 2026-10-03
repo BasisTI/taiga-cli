@@ -143,13 +143,17 @@ func TestIntegrationTaskLostAnswers(t *testing.T) {
 	env, _, _ := freshProject(t, "cli-test-tasks-lost-"+suffix)
 	story := fmt.Sprint(storyJSON(t, env, "", "story", "create", "--subject", "story")["ref"])
 
-	// POST applied, answer lost: the task is found, never created twice.
-	created := storyJSON(t, dropAnswer(t, env, "POST", "tasks", true), "", "task", "create", "--story", story, "--subject", "lost "+suffix)
+	// POST applied, answer lost: the task is found by its fields, never created twice, with a warning.
+	out, errOut, code := runIn(t, dropAnswer(t, env, "POST", "tasks", true), "", "task", "create", "--story", story, "--subject", "lost "+suffix, "--tag", "a", "--due-date", "2026-12-31")
+	var created map[string]any
+	if err := json.Unmarshal([]byte(out), &created); err != nil || code != 0 || !strings.Contains(errOut, "warning [task_create_matched]") {
+		t.Fatalf("applied-lost: %d %s %s", code, out, errOut)
+	}
 	if got := taskRefs(t, env, "--story", story); got != fmt.Sprint(created["ref"]) {
 		t.Fatalf("applied-lost: %q, created %v", got, created["ref"])
 	}
 	// POST not applied, answer lost: unconfirmed, exit 1, nothing created.
-	_, errOut, code := runIn(t, dropAnswer(t, env, "POST", "tasks", false), "", "task", "create", "--story", story, "--subject", "never "+suffix)
+	_, errOut, code = runIn(t, dropAnswer(t, env, "POST", "tasks", false), "", "task", "create", "--story", story, "--subject", "never "+suffix)
 	if code != 1 || !strings.Contains(errOut, "task_create_unconfirmed") || taskRefs(t, env, "--story", story) != fmt.Sprint(created["ref"]) {
 		t.Fatalf("not-applied-lost: %d %s", code, errOut)
 	}
@@ -248,5 +252,62 @@ func TestIntegrationTaskFieldsAndComments(t *testing.T) {
 	}
 	if author, _ := items[1]["user"].(map[string]any); author["username"] != testtaiga.ServiceUser {
 		t.Fatalf("author: %v", items[1]["user"])
+	}
+}
+
+// otherProcess is a proxy to the local Taiga that, for the first POST tasks, does not forward
+// it: it creates instead, with the same token, the task body (another process of the same
+// account), and answers status to the CLI.
+func otherProcess(t *testing.T, env map[string]string, status int, body map[string]any) map[string]string {
+	t.Helper()
+	done := false
+	url := proxy(t, func(w http.ResponseWriter, r *http.Request, _ []byte) bool {
+		if done || r.Method != "POST" || r.URL.Path != "/api/v1/tasks" {
+			return false
+		}
+		done = true
+		payload, _ := json.Marshal(body)
+		req, _ := http.NewRequest("POST", testtaiga.URL()+"/api/v1/tasks", bytes.NewReader(payload))
+		req.Header = r.Header.Clone()
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil || resp.StatusCode != 201 {
+			t.Errorf("other process: %v %v", err, resp)
+		} else {
+			_ = resp.Body.Close()
+		}
+		w.WriteHeader(status)
+		return true
+	})
+	out := map[string]string{}
+	for k, v := range env {
+		out[k] = v
+	}
+	out["TAIGA_URL"] = url
+	return out
+}
+
+// A lost POST while another process of the same account creates a task with the same subject:
+// a candidate with other fields is shown, never adopted; one with every field equal is taken,
+// with the warning that the match is not a proof.
+func TestIntegrationTaskCreateLostNextToAnotherProcess(t *testing.T) {
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	env, _, pid := freshProject(t, "cli-test-tasks-other-"+suffix)
+	s := storyJSON(t, env, "", "story", "create", "--subject", "story")
+	story := fmt.Sprint(s["ref"])
+	for _, status := range []int{502, 302} {
+		subject := fmt.Sprintf("Escrever testes %d %s", status, suffix)
+		theirs := map[string]any{"project": pid, "user_story": s["id"], "subject": subject, "description": "created by process B", "tags": []string{"process-b"}}
+		_, errOut, code := runIn(t, otherProcess(t, env, status, theirs), "requested by process A", "task", "create", "--story", story,
+			"--subject", subject, "--description-file", "-", "--tag", "process-a", "--due-date", "2026-12-31")
+		if code != 1 || !strings.Contains(errOut, "task_create_unconfirmed") || !strings.Contains(errOut, "differ from the request") || strings.Contains(errOut, "warning") {
+			t.Fatalf("%d, other fields: %d %s", status, code, errOut)
+		}
+		same := map[string]any{"project": pid, "user_story": s["id"], "subject": subject + " same", "description": "same", "tags": []string{"x"}, "due_date": "2026-12-31"}
+		out, errOut, code := runIn(t, otherProcess(t, env, status, same), "same", "task", "create", "--story", story,
+			"--subject", subject+" same", "--description-file", "-", "--tag", "X", "--due-date", "2026-12-31")
+		if code != 0 || !strings.Contains(out, "same") || !strings.Contains(errOut, "warning [task_create_matched]") {
+			t.Fatalf("%d, same fields: %d %s %s", status, code, out, errOut)
+		}
 	}
 }

@@ -131,3 +131,29 @@ func TestTaskCommentTextShowsTheTaskSummary(t *testing.T) {
 		t.Fatalf("%d %s %s", code, out, stderr)
 	}
 }
+
+// --force-version skips the version check after a lost answer too; the values are still checked.
+func TestTaskFieldSetForceVersionOnLostAnswer(t *testing.T) {
+	bump := func(other bool) func(v map[string]any) {
+		return func(v map[string]any) {
+			if v["task"] == 9100 {
+				v["version"] = v["version"].(int) + 1
+				if other {
+					v["attributes_values"] = map[string]any{"27": "theirs"}
+				}
+			}
+		}
+	}
+	f, _ := fieldFake(t)
+	f.valuesStatus = 502
+	f.onPatchValues = bump(false)
+	if out, stderr, code := runIn(t, f.env(), "", "task", "field", "set", "250", "Horas=8h", "--force-version"); code != 0 || !strings.Contains(out, `"8h"`) {
+		t.Fatalf("force: %d %s %s", code, out, stderr)
+	}
+	f, _ = fieldFake(t)
+	f.valuesStatus = 502
+	f.onPatchValues = bump(true)
+	if _, stderr, code := runIn(t, f.env(), "", "task", "field", "set", "250", "Horas=8h", "--force-version"); code != 1 || !strings.Contains(stderr, "task_update_unconfirmed") {
+		t.Fatalf("force, other values: %d %s", code, stderr)
+	}
+}

@@ -28,8 +28,10 @@ type taskAPI struct {
 	postErr     error
 	postApplied bool
 	postBody    string // a 2xx POST answer that replaces the created task
-	// onPost runs after a POST is stored (to simulate a concurrent create).
-	onPost func()
+	// onPost runs after a POST is stored (to simulate a concurrent create); onPostSent runs when
+	// the POST arrives, stored or not (another process creating in the meantime).
+	onPost     func()
+	onPostSent func()
 	// patchErr answers the PATCH (WriteVersionedFrom) with this error; patchApplied applies it anyway.
 	patchErr     error
 	patchApplied bool
@@ -80,6 +82,9 @@ func (f *taskAPI) Do(_ context.Context, r taiga.Request) (*taiga.Response, error
 		}
 	case r.Method == "POST" && r.Path == "tasks":
 		f.written = true
+		if f.onPostSent != nil {
+			f.onPostSent()
+		}
 		body := r.Body.(Object)
 		if f.postErr == nil || f.postApplied {
 			f.nextID++
@@ -317,6 +322,9 @@ func TestCreateTaskUncertainOutcomeFindsTheTask(t *testing.T) {
 		if v := got.(Object); fmt.Sprint(v["id"]) != "9201" || len(f.writes()) != 1 {
 			t.Fatalf("%s: %v, writes %d", name, v["id"], len(f.writes()))
 		}
+		if len(s.Warnings) != 1 || s.Warnings[0].Code != "task_create_matched" || !strings.Contains(s.Warnings[0].Message, "#300") {
+			t.Fatalf("%s: warnings %+v", name, s.Warnings)
+		}
 	}
 }
 
@@ -507,5 +515,73 @@ func TestCloseTaskWithTwoClosedStatusesNeedsOne(t *testing.T) {
 	}
 	if _, err := s.CloseTask(context.Background(), "250", "Rejected", false, false); err != nil || len(f.writes()) != 1 {
 		t.Fatalf("named closed status: %v", err)
+	}
+}
+
+// another creates, in the meantime, a task of the same story, owner and subject as the request.
+func another(f *taskAPI, fields Object) func() {
+	return func() {
+		o := Object{"id": json.Number("9999"), "ref": json.Number("301"), "project": json.Number("37"), "version": json.Number("1"),
+			"subject": "Nova", "description": "", "user_story": json.Number("6808"), "owner": json.Number("5"), "tags": []any{},
+			"status": json.Number("11"), "assigned_to": nil, "due_date": nil}
+		for k, v := range fields {
+			o[k] = v
+		}
+		f.tasks[9999] = o
+	}
+}
+
+// A lost POST and a task of another process with the same subject but other fields: the
+// candidate is shown for inspection, never adopted.
+func TestCreateTaskUncertainOutcomeRejectsACandidateWithOtherFields(t *testing.T) {
+	request := Object{"subject": "Nova", "description": "requested by A", "tags": []string{"process-a"}, "due_date": "2026-12-31",
+		"status": json.Number("12"), "assigned_to": json.Number("6")}
+	for name, theirs := range map[string]Object{
+		"description": {"description": "created by B", "tags": []any{[]any{"process-a", nil}}, "due_date": "2026-12-31", "status": json.Number("12"), "assigned_to": json.Number("6")},
+		"tags":        {"description": "requested by A", "tags": []any{[]any{"process-b", nil}}, "due_date": "2026-12-31", "status": json.Number("12"), "assigned_to": json.Number("6")},
+		"due_date":    {"description": "requested by A", "tags": []any{[]any{"process-a", nil}}, "due_date": nil, "status": json.Number("12"), "assigned_to": json.Number("6")},
+		"status":      {"description": "requested by A", "tags": []any{[]any{"process-a", nil}}, "due_date": "2026-12-31", "status": json.Number("11"), "assigned_to": json.Number("6")},
+		"assigned_to": {"description": "requested by A", "tags": []any{[]any{"process-a", nil}}, "due_date": "2026-12-31", "status": json.Number("12"), "assigned_to": nil},
+	} {
+		for _, sendErr := range []error{gateway, redirect, lost} {
+			f, s := newTaskAPI(t)
+			f.postErr = sendErr
+			f.onPostSent = another(f, theirs)
+			body := Object{}
+			for k, v := range request {
+				body[k] = v
+			}
+			_, err := s.CreateTask(context.Background(), story6808(), body, false)
+			e := output.AsError(err)
+			if e.Code != "task_create_unconfirmed" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Cause, "#301") || !strings.Contains(e.Cause, name) ||
+				!strings.Contains(e.Recovery, "taiga task get 301") || len(s.Warnings) != 0 {
+				t.Fatalf("%s %v: %#v warnings %v", name, sendErr, e, s.Warnings)
+			}
+		}
+	}
+}
+
+// Every field sent matches (tags as Taiga stores them): success, with a warning that says the
+// match is a heuristic.
+func TestCreateTaskUncertainOutcomeMatchingCandidateWarns(t *testing.T) {
+	f, s := newTaskAPI(t)
+	f.postErr = gateway
+	f.onPostSent = another(f, Object{"description": "requested by A", "tags": []any{[]any{"process-a", nil}}, "due_date": "2026-12-31"})
+	got, err := s.CreateTask(context.Background(), story6808(), Object{"subject": "Nova", "description": "requested by A", "tags": []string{"process-a"}, "due_date": "2026-12-31"}, false)
+	if err != nil || fmt.Sprint(got.(Object)["id"]) != "9999" {
+		t.Fatalf("%v %v", got, err)
+	}
+	if len(s.Warnings) != 1 || s.Warnings[0].Code != "task_create_matched" || !strings.Contains(s.Warnings[0].Message, "another process") {
+		t.Fatalf("warnings %+v", s.Warnings)
+	}
+}
+
+// The candidate cannot be read to compare: unconfirmed, never the list form.
+func TestCreateTaskUncertainOutcomeUnreadableCandidateIsUnconfirmed(t *testing.T) {
+	f, s := newTaskAPI(t)
+	f.postErr, f.postApplied, f.readErr = gateway, true, gateway
+	_, err := s.CreateTask(context.Background(), story6808(), Object{"subject": "Nova"}, false)
+	if e := output.AsError(err); e.Code != "task_create_unconfirmed" || !strings.Contains(e.Cause, "#300") {
+		t.Fatalf("%#v", e)
 	}
 }

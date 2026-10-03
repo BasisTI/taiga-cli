@@ -128,6 +128,16 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 		stdin string
 		args  []string
 	}{func() map[string]string { _, env := story(); return env }, sweepURL, []string{"story", "create", "--subject", "s", "--description-file", "-", "--dry-run"}})
+	// A create confirmed by matching fields after a lost answer prints a warning.
+	cases = append(cases, struct {
+		env   func() map[string]string
+		stdin string
+		args  []string
+	}{func() map[string]string {
+		f, env := story()
+		f.postStatus = 502
+		return env
+	}, "", []string{"task", "create", "--story", "246", "--subject", "s " + sweepURL}})
 	for _, args := range [][]string{
 		{"project", "list"}, {"project", "get"}, {"user", "list"}, {"milestone", "list"}, {"epic", "list"}, {"epic", "get", "9"},
 		{"auth", "status", "--diagnose"},

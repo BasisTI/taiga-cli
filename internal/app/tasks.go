@@ -43,9 +43,8 @@ func (s *Service) CloseTask(ctx context.Context, ref, selector string, dry, forc
 
 // CreateTask posts body as a task of story, sent once and without version. When the answer says
 // nothing conclusive (network after the connection opened, 5xx, 3xx), the tasks of the story are
-// searched for one created by this account with this subject that was not there before the
-// POST; one found is the result, otherwise task_create_unconfirmed. A re-run is never offered:
-// it would create a second task.
+// searched (findTask); a match is the result, with a warning, otherwise task_create_unconfirmed.
+// A re-run is never offered: it would create a second task.
 func (s *Service) CreateTask(ctx context.Context, story Object, body Object, dry bool) (any, error) {
 	subject, _ := body["subject"].(string)
 	if strings.TrimSpace(subject) == "" {
@@ -71,7 +70,7 @@ func (s *Service) CreateTask(ctx context.Context, story Object, body Object, dry
 		case errors.As(err, &ue):
 			return nil, taskKind.applied(taiga.ToOutput(err), check)
 		case uncertain(err):
-			return s.findTask(ctx, story, me, subject, known, err)
+			return s.findTask(ctx, story, me, body, known, err)
 		}
 		return nil, taiga.ToOutput(err)
 	}
@@ -108,35 +107,60 @@ func (s *Service) storyTasks(ctx context.Context, story Object) (map[int64]bool,
 }
 
 // findTask looks for the task of a POST whose outcome is unknown: a task of story, owned by me,
-// with exactly subject, that was not in known (read right before the POST).
-func (s *Service) findTask(ctx context.Context, story, me Object, subject string, known map[int64]bool, sendErr error) (Object, error) {
+// with the subject sent, that was not in known (read right before the POST). The only such task
+// is the result when, read in full, it holds every field sent; that is a match, not a proof
+// (another process of the same account may have created an identical task meanwhile), so a
+// warning says so. Any other case is task_create_unconfirmed, naming the candidates for
+// inspection.
+func (s *Service) findTask(ctx context.Context, story, me, body Object, known map[int64]bool, sendErr error) (Object, error) {
 	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
 	defer cancel()
 	items, err := s.list(check, "tasks", url.Values{"user_story": {fmt.Sprint(story["id"])}})
+	recovery := fmt.Sprintf("do not re-run the command blindly: it would create another task; wait, check `taiga task list --story %v` and create it only if it is still missing", story["ref"])
 	var checked string
 	if err != nil {
 		checked = "the tasks of the story could not be read to check: " + output.AsError(err).Error()
 	} else {
 		found := []Object{}
 		for _, o := range items {
-			if ID(o["user_story"]) == ID(story["id"]) && !known[ID(o["id"])] && o["subject"] == subject && ID(o["owner"]) > 0 && ID(o["owner"]) == ID(me["id"]) {
+			if ID(o["user_story"]) == ID(story["id"]) && !known[ID(o["id"])] && o["subject"] == body["subject"] && ID(o["owner"]) > 0 && ID(o["owner"]) == ID(me["id"]) {
 				found = append(found, o)
 			}
 		}
 		switch len(found) {
 		case 1:
-			if o, err := Read(check, s.API, fmt.Sprintf("tasks/%d", ID(found[0]["id"])), nil); err == nil {
-				return s.TaskView(o)
+			ref, id := found[0]["ref"], ID(found[0]["id"])
+			recovery = fmt.Sprintf("do not re-run the command blindly: it would create another task; inspect the candidate with `taiga task get %v` and `taiga task list --story %v`, and create the task only if it is still missing", ref, story["ref"])
+			full, err := Read(check, s.API, fmt.Sprintf("tasks/%d", id), nil)
+			if err != nil {
+				checked = fmt.Sprintf("the story has one new task of this account with this subject, #%v (id %d), but it could not be read to compare: %s", ref, id, output.AsError(err).Error())
+				break
 			}
-			return s.TaskView(found[0])
+			sent := Object{}
+			for k, v := range body {
+				if k != "project" {
+					sent[k] = v
+				}
+			}
+			if diff := differences(full, sent); len(diff) > 0 {
+				checked = fmt.Sprintf("the story has one new task of this account with this subject, #%v (id %d), but its %s differ from the request: it may belong to another process", ref, id, strings.Join(diff, ", "))
+				break
+			}
+			s.Warnings = append(s.Warnings, Warning{Code: "task_create_matched", Message: fmt.Sprintf(
+				"the POST answer was lost (%v); task #%v is the story's only new task of this account and holds every field sent, so it is taken as the one created. "+
+					"This is a match, not a proof: another process using the same account could have created an identical task", sendErr, ref)})
+			return s.TaskView(full)
 		case 0:
 			checked = "the story has no new task with this subject yet, but the request may still be running on the server"
 		default:
-			checked = fmt.Sprintf("the story has %d new tasks of this account with this subject", len(found))
+			refs := []string{}
+			for _, o := range found {
+				refs = append(refs, fmt.Sprintf("#%v", o["ref"]))
+			}
+			checked = fmt.Sprintf("the story has %d new tasks of this account with this subject (%s)", len(found), strings.Join(refs, ", "))
 		}
 	}
 	return nil, &output.Error{Code: "task_create_unconfirmed", Source: taiga.ToOutput(sendErr).Source, Stage: "POST tasks",
 		Cause:    fmt.Sprintf("the task may have been created: POST tasks failed (%v) and %s", sendErr, checked),
-		Recovery: fmt.Sprintf("do not re-run the command blindly: it would create another task; wait, check `taiga task list --story %v` and create it only if it is still missing", story["ref"]),
-		Exit:     output.ExitUnexpected}
+		Recovery: recovery, Exit: output.ExitUnexpected}
 }
