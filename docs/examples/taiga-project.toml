@@ -1,8 +1,10 @@
-# Exemplo de configuração de projeto para `taiga project plan|apply -f`.
+# Configuração de projeto para `taiga project plan|apply -f`.
 #
-# Reproduz o que o configurar-taiga-projeto.sh da skill basis-ci-gitlab prepara: os status
-# opcionais do fluxo da story e os campos de registro de início e de teste. Nomes, cores e
-# descrições são exemplo, não valores embutidos na CLI: confirme a convenção do seu projeto.
+# Este arquivo é a convenção canônica do fluxo da skill basis-ci-gitlab: os status
+# `In revision` e `Waiting for deployment` e os 6 campos de registro de início e de teste.
+# Substitui o configurar-taiga-projeto.sh; as diferenças de comportamento em relação ao
+# script foram aprovadas na US #254 (decisão D5). Mude nomes, cores ou descrições aqui, e
+# não num board isolado, para o fluxo continuar igual em todos os projetos.
 #
 # - Nada é removido nem alterado: status e campos fora do arquivo ficam como estão, e um
 #   declarado que já existe com outra cor, outro `closed`, outro tipo ou outra descrição é

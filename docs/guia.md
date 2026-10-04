@@ -2,6 +2,18 @@
 
 Guia curto para a equipe. A referência completa está no [README](../README.md) (em inglês) e os códigos de erro em [errors.md](errors.md).
 
+## Instalação
+
+O binário vai em `~/.local/bin`, como o `sgo`. O caminho principal é o tar.gz da [release](https://github.com/BasisTI/taiga-cli/releases), conferido pelo `SHA256SUMS`; a alternativa é `GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.3.0`. Os comandos estão na seção "Install" do README.
+
+Agentes usam a CLI pela skill [`taiga-cli`](../skills/taiga-cli/SKILL.md), que mora neste repositório e é instalada pelo skills CLI:
+
+```sh
+npx skills add BasisTI/taiga-cli
+```
+
+A skill diz ao agente qual comando usar, que ele para e pede o login a uma pessoa nos erros de autenticação, e o que conferir depois de uma escrita incerta em vez de repeti-la. Quando a CLI e o MCP do Taiga estão disponíveis, a CLI tem precedência; não é aconselhado manter os dois.
+
 ## Login com a conta de serviço
 
 Em cada máquina onde agentes vão usar o Taiga, uma pessoa faz o login uma vez com a conta de serviço:
@@ -172,14 +184,14 @@ taiga story field set 246 --unset "Testado em staging" --unset "Data de entrega"
 - `--unset NOME` (repetível, nome ou id) limpa um campo `checkbox` ou `date`: o Taiga guarda `null` na chave do campo, que continua no dicionário mesmo quando é o último (o Taiga recusa dicionário vazio). Campo sem valor, ou já `null`, não gera escrita. Campo `text` não se limpa (erro de uso); para esvaziar, `"Notas="`. No JSON o valor limpo aparece como `null`; no texto, vazio, como campo sem valor.
 - `story field set` junta os campos informados aos atuais e grava o dicionário inteiro com o `version` do recurso de valores, que é outro, independente do `version` da story. `story get` mostra os dois: o da story no topo e o dos valores em `custom_attributes`.
 - O Taiga não recusa `version` antigo nos valores de campos customizados. A CLI confere a resposta: se outra gravação caiu junto da nossa, sai `field_values_postcondition_failed` (exit 4) e a alteração **foi gravada**; confira com `taiga story field list` antes de repetir.
-- Campos de task: as definições já têm `field list/create --kind task`; o comando de valores de task vem com a #253.
+- Campos de task: as definições têm `field list/create --kind task`, e os valores, `task field list/set`.
 
 ## Status e campos do projeto como código
 
 Substitui o `configurar-taiga-projeto.sh` da skill basis-ci-gitlab. O arquivo TOML declara status de story e campos
-customizados de story; [docs/examples/taiga-project.toml](examples/taiga-project.toml) traz o equivalente ao script
-(`In revision`, `Waiting for deployment` e os seis campos de registro). Nomes, cores e descrições do exemplo são
-exemplo, não configuração embutida na CLI.
+customizados de story. [docs/examples/taiga-project.toml](examples/taiga-project.toml) é a convenção canônica do fluxo
+da `basis-ci-gitlab` (`In revision`, `Waiting for deployment` e os seis campos de registro); as diferenças de
+comportamento em relação ao script foram aprovadas na US #254. A CLI não embute esses valores: eles vêm do arquivo.
 
 ```sh
 taiga status list --output text
@@ -215,7 +227,7 @@ taiga project apply -f taiga-project.toml          # exige admin do projeto
 
 ## `taiga api` para o que ainda não tem comando próprio
 
-Enquanto os comandos curados das próximas fases não chegam, `taiga api` cobre as receitas que hoje estão na skill `basis-ci-gitlab`. O caminho é relativo a `/api/v1/`, e `--auto-version` lê o `version` atual antes de gravar.
+`taiga api` é a saída de emergência para o que não tem comando curado; bloqueio e campos customizados, por exemplo, já têm (`story update --block`, `story field set`). O caminho é relativo a `/api/v1/`, e `--auto-version` lê o `version` atual antes de gravar. O `taiga api` não confere a escrita: um exit 7 depois do envio pode ter gravado, então confira com um `GET` antes de repetir.
 
 ```sh
 # bloquear com motivo
