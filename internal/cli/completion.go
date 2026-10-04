@@ -47,7 +47,7 @@ func completionArg(s string) string {
 }
 
 // completionCmd gives Cobra's `completion bash|zsh|fish|powershell` (its help and flags kept)
-// scripts without the shell's own debug log. That log appends the command line as typed,
+// scripts whose own debug log writes nothing. That log appends the command line as typed,
 // tokens included, to $BASH_COMP_DEBUG_FILE; the binary's log there stays, redacted by
 // completeRedacted.
 func (a *App) completionCmd(root *cobra.Command) {
@@ -70,7 +70,7 @@ func (a *App) completionCmd(root *cobra.Command) {
 	}
 }
 
-// completionScript is Cobra's script for shell without its debug writer and the calls to it.
+// completionScript is Cobra's script for shell with its debug writer redefined to do nothing.
 func completionScript(root *cobra.Command, shell string, desc bool) (string, error) {
 	var b bytes.Buffer
 	var err error
@@ -97,75 +97,17 @@ func completionScript(root *cobra.Command, shell string, desc bool) (string, err
 	if err != nil {
 		return "", err
 	}
-	return withoutShellDebug(b.String(), "__"+root.Name()+"_debug", shellNoop[shell])
+	return withQuietDebug(b.String(), "__"+root.Name()+"_debug", shell)
 }
 
-// shellNoop replaces each call to the debug writer, so a block never ends up empty and the
-// status stays 0, as the writer's own when the variable is unset. PowerShell needs none.
-var shellNoop = map[string]string{"bash": ":", "zsh": ":", "fish": "true", "powershell": ""}
+// quietWriter redefines the debug writer (%s) as a function that does nothing and returns 0,
+// as the writer itself does when the variable is unset.
+var quietWriter = map[string]string{"bash": "%s() { :; }", "zsh": "%s() { :; }", "fish": "function %s; end", "powershell": "function %s { }"}
 
-// debugArgs is the one double-quoted argument of a call to the debug writer, and nothing after.
-var debugArgs = regexp.MustCompile(`^\s+"(?:[^"\\]|\\.)*"$`)
-
-// withoutShellDebug is script without the debug writer and with each call to it turned into
-// noop, or an error and no script. Cutting goes by the text (dropShellDebug), which a change
-// of Cobra's format could fool; what comes out is then checked against script without
-// relying on that format (onlyDebugDropped): every function but the writer is still
-// declared, and nothing else changed. A script that fails the check is refused.
-func withoutShellDebug(script, writer, noop string) (string, error) {
-	out, err := dropShellDebug(script, writer, noop)
-	if err == nil {
-		err = onlyDebugDropped(script, out, writer, noop)
-	}
-	if err != nil {
-		return "", err
-	}
-	return out, nil
-}
-
-// dropShellDebug drops the definition of writer, from its first line to the "}" or "end"
-// that closes it at the margin, and turns each call into noop. A line at the margin inside
-// the writer (other than its braces) is refused; a call must be a line of its own with at
-// most one quoted argument, since anything after it would go with the line. Anything left
-// that names the writer or the variable is an error.
-func dropShellDebug(script, writer, noop string) (string, error) {
-	var b strings.Builder
-	inWriter := false
-	for _, line := range strings.SplitAfter(script, "\n") {
-		text := strings.TrimRight(line, "\n")
-		trimmed := strings.TrimSpace(text)
-		switch {
-		case inWriter:
-			// The body is indented: a line at the margin closes the writer or is not its own.
-			margin := text != "" && text == strings.TrimLeft(text, " \t")
-			if margin && text != "{" && text != "}" && text != "end" {
-				return "", fmt.Errorf("the %s writer of the completion script has no closing line at the margin", writer)
-			}
-			inWriter = text != "}" && text != "end"
-		case text == writer+"()" || text == "function "+writer || text == "function "+writer+" {":
-			inWriter = true
-		case trimmed == writer || strings.HasPrefix(trimmed, writer+" ") || strings.HasPrefix(trimmed, writer+"\t"):
-			if trimmed != writer && !debugArgs.MatchString(trimmed[len(writer):]) {
-				return "", fmt.Errorf("the %s completion script calls %s next to another statement: %q", writer, writer, trimmed)
-			}
-			if noop != "" {
-				b.WriteString(text[:len(text)-len(strings.TrimLeft(text, " \t"))] + noop + "\n")
-			}
-		default:
-			b.WriteString(line)
-		}
-	}
-	out := b.String()
-	if inWriter || strings.Contains(out, writer) || strings.Contains(out, "BASH_COMP_DEBUG_FILE") {
-		return "", fmt.Errorf("the %s completion script still logs to BASH_COMP_DEBUG_FILE", writer)
-	}
-	return out, nil
-}
-
-// declaration finds a function declared on a line, in any of the four scripts and at any
-// indent: "name()" and "function name" (bash, zsh), "function name" (fish), "function name",
-// "filter name" and "[scriptblock]${name} =" (PowerShell).
-var declaration = regexp.MustCompile(`^\s*(?:(?:function|filter)\s+([^\s(){}]+)|([A-Za-z_][\w:.-]*)\s*\(\)|\[scriptblock\]\$\{([^}]+)\}\s*=)`)
+// declaration finds a function declared on a line, at any indent: "name()" and "function
+// name" (bash, zsh), "function name" (fish), "function name", "filter name" and
+// "[scriptblock]${name} =" (PowerShell).
+var declaration = regexp.MustCompile(`^\s*(?:(?:function|filter)\s+([^\s(){};]+)|([A-Za-z_][\w:.-]*)\s*\(\)|\[scriptblock\]\$\{([^}]+)\}\s*=)`)
 
 // declared is the function a line declares, or "".
 func declared(line string) string {
@@ -176,67 +118,38 @@ func declared(line string) string {
 	return m[1] + m[2] + m[3]
 }
 
-// onlyDebugDropped checks out against script, line by line: each line is kept as is, or is a
-// call to writer that became noop (dropped when noop is ""), or belongs to one run of lines
-// that starts where writer is declared, ends on "}" or "end" and declares nothing else. It
-// also checks that every function script declares, writer aside, is still declared in out.
-func onlyDebugDropped(script, out, writer, noop string) error {
-	fail := func(format string, args ...any) error {
-		return fmt.Errorf("the completion script changed beyond its debug log: "+format, args...)
-	}
-	count := func(text string) map[string]int {
-		names := map[string]int{}
-		for _, line := range strings.Split(text, "\n") {
-			if name := declared(line); name != "" {
-				names[name]++
-			}
-		}
-		return names
-	}
-	want, got := count(script), count(out)
-	delete(want, writer)
-	for name, n := range want {
-		if got[name] != n {
-			return fail("%s is declared %d times, %d before", name, got[name], n)
+// withQuietDebug is script with writer redefined to do nothing, or an error and no script.
+// Nothing of Cobra's script is removed or changed: the redefinition is added before the first
+// function declared at the margin after writer's (last) declaration, above the comment lines
+// that go with that function. Writer's body has ended there, and nothing has run yet: zsh
+// autoloaded from fpath runs the file on first use and calls the completion at its end, and
+// fish completes once while loading, so the end of the script would be too late. Every call
+// then goes to the redefinition, PowerShell's included (same scope as the script's own
+// functions). Without writer's declaration, or with no declaration after it, the script is
+// refused.
+func withQuietDebug(script, writer, shell string) (string, error) {
+	lines := strings.SplitAfter(script, "\n")
+	last := -1
+	for i, line := range lines {
+		if declared(strings.TrimRight(line, "\n")) == writer {
+			last = i
 		}
 	}
-	if len(got) != len(want) {
-		return fail("it declares %d functions, %d before", len(got), len(want))
+	if last < 0 {
+		return "", fmt.Errorf("the %s completion script does not declare %s", shell, writer)
 	}
-	o, f := strings.Split(script, "\n"), strings.Split(out, "\n")
-	i, j, runs := 0, 0, 0
-	for i < len(o) {
-		trimmed := strings.TrimSpace(o[i])
-		switch {
-		case j < len(f) && o[i] == f[j]:
-			i, j = i+1, j+1
-		case trimmed == writer || strings.HasPrefix(trimmed, writer+" ") || strings.HasPrefix(trimmed, writer+"\t"):
-			if noop != "" {
-				if j >= len(f) || f[j] != o[i][:len(o[i])-len(strings.TrimLeft(o[i], " \t"))]+noop {
-					return fail("line %d: a call to %s did not become %q", i+1, writer, noop)
-				}
-				j++
-			}
-			i++
-		case declared(o[i]) == writer && runs == 0:
-			runs++
-			k := i + 1
-			for k < len(o) && (j >= len(f) || o[k] != f[j]) {
-				if name := declared(o[k]); name != "" {
-					return fail("line %d: %s went with the writer", k+1, name)
-				}
-				k++
-			}
-			if last := strings.TrimSpace(o[k-1]); last != "}" && last != "end" {
-				return fail("line %d: the writer does not end on a closing line", k)
-			}
-			i = k
-		default:
-			return fail("line %d (%q) is missing", i+1, o[i])
+	for i := last + 1; i < len(lines); i++ {
+		text := strings.TrimRight(lines[i], "\n")
+		if declared(text) == "" || text != strings.TrimLeft(text, " \t") {
+			continue
 		}
+		for i > last+1 && strings.HasPrefix(lines[i-1], "#") {
+			i-- // above the comment that goes with that function
+		}
+		quiet := "# taiga: " + writer + " above appends the command line as typed, tokens included, to\n" +
+			"# $BASH_COMP_DEBUG_FILE. Redefined here, before any completion runs, it writes nothing.\n" +
+			fmt.Sprintf(quietWriter[shell], writer) + "\n\n"
+		return strings.Join(lines[:i], "") + quiet + strings.Join(lines[i:], ""), nil
 	}
-	if j != len(f) {
-		return fail("%d lines were added", len(f)-j)
-	}
-	return nil
+	return "", fmt.Errorf("the %s completion script declares nothing after %s", shell, writer)
 }

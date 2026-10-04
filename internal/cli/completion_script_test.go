@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -56,86 +55,80 @@ func generatedScript(t *testing.T, shell string, desc bool) string {
 	return out
 }
 
-var debugCall = regexp.MustCompile(`^(\s*)__taiga_debug( .*)?$`)
-
-// testNoop is what each call to the debug writer must become: a no-op where a block could end
-// up empty, nothing in PowerShell.
-var testNoop = map[string]string{"bash": ":", "zsh": ":", "fish": "true", "powershell": ""}
-
-// withoutDebug is Cobra's script without the debug writer, each call turned into the no-op.
-func withoutDebug(shell, script string) string {
-	out := []string{}
-	writer := false
-	for _, line := range strings.Split(script, "\n") {
-		m := debugCall.FindStringSubmatch(line)
-		switch {
-		case line == "__taiga_debug()" || strings.HasPrefix(line, "function __taiga_debug"):
-			writer = true
-		case writer:
-			writer = line != "}" && line != "end"
-		case m != nil:
-			if testNoop[shell] != "" {
-				out = append(out, m[1]+testNoop[shell])
-			}
-		default:
-			out = append(out, line)
-		}
-	}
-	return strings.Join(out, "\n")
+// quietBlock is what `taiga completion shell` adds to Cobra's script, and all it adds.
+func quietBlock(shell string) string {
+	def := map[string]string{"bash": "__taiga_debug() { :; }", "zsh": "__taiga_debug() { :; }",
+		"fish": "function __taiga_debug; end", "powershell": "function __taiga_debug { }"}[shell]
+	return "# taiga: __taiga_debug above appends the command line as typed, tokens included, to\n" +
+		"# $BASH_COMP_DEBUG_FILE. Redefined here, before any completion runs, it writes nothing.\n" + def + "\n\n"
 }
 
-// The scripts carry no debug log of their own: no writer, no call, no BASH_COMP_DEBUG_FILE.
-// Everything else is Cobra's script, line for line, with a no-op where each call was.
-func TestCompletionScriptsHaveNoShellDebug(t *testing.T) {
+// The scripts are Cobra's with one block added after the debug writer's definition, which
+// redefines the writer to do nothing; nothing else is added, removed or changed.
+func TestCompletionScriptsOnlyAddTheQuietWriter(t *testing.T) {
 	for _, shell := range completionShells {
 		for _, desc := range []bool{true, false} {
-			got := generatedScript(t, shell, desc)
-			if strings.Contains(got, "__taiga_debug") || strings.Contains(got, "BASH_COMP_DEBUG_FILE") {
-				t.Errorf("%s (descriptions %v) still logs to BASH_COMP_DEBUG_FILE", shell, desc)
+			got, cobra := generatedScript(t, shell, desc), cobraScript(t, shell, desc)
+			at := strings.Index(got, quietBlock(shell))
+			if at < 0 || got[:at]+got[at+len(quietBlock(shell)):] != cobra {
+				t.Errorf("%s (descriptions %v) is not Cobra's script plus the quiet writer", shell, desc)
+				continue
 			}
-			if want := withoutDebug(shell, cobraScript(t, shell, desc)); got != want {
-				t.Errorf("%s (descriptions %v) differs from Cobra's beyond the debug log", shell, desc)
+			if first := strings.Index(cobra, "__taiga_debug \""); at > first || at < strings.Index(cobra, "__taiga_debug") {
+				t.Errorf("%s (descriptions %v): the quiet writer at %d is not between the writer and its first call (%d)", shell, desc, at, first)
 			}
 		}
 	}
 }
 
-// A call that shares its line with another statement, or a writer left open, fails closed:
-// dropping the line would drop the statement too.
-func TestCompletionScriptFilterFailsClosed(t *testing.T) {
-	for _, script := range []string{
-		"f() {\n    __taiga_debug \"x\"; return 3\n}\n",
-		"f() {\n    __taiga_debug \"x\" && return 3\n}\n",
-		"function f\n    __taiga_debug \"y\"; or return 1\nend\n",
-		"case $a in\n    a) __taiga_debug a ;;\nesac\n",
-		"__taiga_debug()\n{\n    echo \"$*\"\n",
-		"g() { echo $BASH_COMP_DEBUG_FILE; }\n",
+// Without the writer's declaration under the expected name, or with nothing declared after
+// it, the script is refused: an error and no script.
+func TestCompletionScriptRefusedWithoutTheWriter(t *testing.T) {
+	cobra := cobraScript(t, "bash", true)
+	for name, script := range map[string]string{
+		"renamed writer":  strings.ReplaceAll(cobra, "__taiga_debug", "__taiga_log"),
+		"no writer":       "_start() { :; }\n",
+		"nothing after":   "__taiga_debug()\n{\n    :\n}\n",
+		"declared inside": "f() {\n    __taiga_debug() { :; }\n}\n",
 	} {
-		if got, err := withoutShellDebug(script, "__taiga_debug", ":"); err == nil {
-			t.Errorf("%q: no error, got %q", script, got)
+		if got, err := withQuietDebug(script, "__taiga_debug", "bash"); err == nil || got != "" {
+			t.Errorf("%s: error %v, got %q", name, err, got)
 		}
 	}
-	// Changes of Cobra's format that would make the filter take the next function with the
-	// writer are refused, with no script: the writer closed with an indent (round 2), and also
-	// every line up to the next function's closing one, its declaration included (round 3).
+}
+
+// statusCheck loads $SCRIPT in a shell, calls the writer after a failure and prints the status:
+// the redefinition returns 0, as the writer itself.
+var statusCheck = map[string][]string{
+	"bash":       {"bash", "--norc", "--noprofile", "-c", `source "$SCRIPT"; false; __taiga_debug "x"; echo "status=$?"`},
+	"zsh":        {"zsh", "-f", "-c", `compdef() { :; }; source "$SCRIPT"; false; __taiga_debug "x"; echo "status=$?"`},
+	"fish":       {"fish", "--no-config", "-c", `source $SCRIPT; false; __taiga_debug "x"; echo "status=$status"`},
+	"powershell": {"pwsh", "-NoProfile", "-NonInteractive", "-Command", `. $env:SCRIPT; $out = __taiga_debug "x"; if ($? -and $null -eq $out) { "status=0" } else { "status=1" }`},
+}
+
+// With BASH_COMP_DEBUG_FILE set, the redefined writer returns 0, prints nothing and writes
+// nothing.
+func TestCompletionScriptsQuietWriter(t *testing.T) {
 	for _, shell := range completionShells {
-		end := "\n}\n"
-		if shell == "fish" {
-			end = "\nend\n"
-		}
-		cobra := cobraScript(t, shell, true)
-		for name, script := range map[string]string{
-			"writer closed with an indent":   strings.Replace(cobra, end, "\n    "+end[1:], 1),
-			"next function indented as well": indentFollowing(t, cobra, end),
-		} {
-			if got, err := withoutShellDebug(script, "__taiga_debug", testNoop[shell]); err == nil || got != "" {
-				t.Errorf("%s, %s: error %v, got %d bytes", shell, name, err, len(got))
+		t.Run(shell, func(t *testing.T) {
+			c := statusCheck[shell]
+			requireShell(t, c[0])
+			dir := t.TempDir()
+			path, log := filepath.Join(dir, "script.ps1"), filepath.Join(dir, "debug.log")
+			if err := os.WriteFile(path, []byte(generatedScript(t, shell, true)), 0o600); err != nil {
+				t.Fatal(err)
 			}
-		}
-	}
-	got, err := withoutShellDebug("f() {\n    __taiga_debug \"a \\\"b\\\" ${c}\"\n    __taiga_debug\n}\n", "__taiga_debug", ":")
-	if err != nil || got != "f() {\n    :\n    :\n}\n" {
-		t.Errorf("got %q, %v", got, err)
+			cmd := exec.Command(c[0], c[1:]...)
+			cmd.Dir = t.TempDir()
+			cmd.Env = append(os.Environ(), "SCRIPT="+path, "BASH_COMP_DEBUG_FILE="+log)
+			out, err := cmd.Output()
+			if err != nil || string(out) != "status=0\n" {
+				t.Errorf("%v: %q", err, out)
+			}
+			if b, err := os.ReadFile(log); err == nil {
+				t.Errorf("the writer wrote %q", b)
+			}
+		})
 	}
 }
 
@@ -153,63 +146,6 @@ func requireShell(t *testing.T, exe string) {
 		}
 	}
 	t.Skipf("%s is not installed", exe)
-}
-
-// The check on the output holds for the real scripts and refuses any other change: a
-// function gone, a line gone or added, a call left without its no-op.
-func TestCompletionScriptCheckRefusesOtherChanges(t *testing.T) {
-	for _, shell := range completionShells {
-		cobra, out := cobraScript(t, shell, true), generatedScript(t, shell, true)
-		if err := onlyDebugDropped(cobra, out, "__taiga_debug", testNoop[shell]); err != nil {
-			t.Fatalf("%s: %v", shell, err)
-		}
-		lines := strings.Split(out, "\n")
-		without := func(i int) string {
-			return strings.Join(append(append([]string{}, lines[:i]...), lines[i+1:]...), "\n")
-		}
-		mutations := map[string]string{"a line added": out + "echo x\n"}
-		for i, line := range lines {
-			if name := declared(line); name != "" && mutations["a declaration gone"] == "" {
-				mutations["a declaration gone"] = without(i)
-			}
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			if strings.TrimSpace(line) == testNoop[shell] && mutations["a no-op gone"] == "" {
-				mutations["a no-op gone"] = without(i)
-			} else if declared(line) == "" {
-				mutations["a line gone"] = without(i) // the last plain line
-			}
-		}
-		for name, mutated := range mutations {
-			if err := onlyDebugDropped(cobra, mutated, "__taiga_debug", testNoop[shell]); err == nil {
-				t.Errorf("%s, %s: accepted", shell, name)
-			}
-		}
-	}
-}
-
-// indentFollowing indents the writer's closing line (the first end at the margin) and every
-// line after it up to the next one, which closes the next function and stays at the margin.
-func indentFollowing(t *testing.T, script, end string) string {
-	t.Helper()
-	start := strings.Index(script, end) + 1
-	stop := start + len(end) - 1
-	next := strings.Index(script[stop:], end)
-	if start == 0 || next < 0 {
-		t.Fatalf("no closing line %q", end)
-	}
-	next += stop + 1
-	var b strings.Builder
-	b.WriteString(script[:start])
-	for _, line := range strings.SplitAfter(script[start:next], "\n") {
-		if strings.TrimSpace(line) != "" {
-			b.WriteString("    ")
-		}
-		b.WriteString(line)
-	}
-	b.WriteString(script[next:])
-	return b.String()
 }
 
 // parsers check a script without running it.
@@ -282,6 +218,23 @@ words=("$BIN" "${ARGS[@]}")
 CURRENT=${#words}
 _taiga
 `},
+	// zsh as installed: the script is _taiga in fpath, autoloaded, and the file itself runs on
+	// the first completion.
+	"zsh-autoload": {"zsh", func(h string) []string { return []string{"-f", "-c", h, "zsh"} }, `
+ARGS=("$@")
+dir=$(mktemp -d)
+cp "$SCRIPT" "$dir/_taiga"
+fpath=("$dir" $fpath)
+compdef() { :; }
+compadd() { print -r -- "compadd $*"; }
+_describe() { print -r -- "describe $* :: ${(j:|:)completions}"; return 0; }
+_arguments() { print -r -- "arguments $*"; }
+autoload -U _taiga
+words=("$BIN" "${ARGS[@]}")
+CURRENT=${#words}
+_taiga
+rm -r "$dir"
+`},
 	"fish": {"fish", func(h string) []string { return []string{"--no-config", "-c", h, "--"} }, `
 source $SCRIPT
 set -l words (string escape -- $argv)
@@ -328,18 +281,24 @@ func complete(t *testing.T, shell, bin, script string, words ...string) (out, de
 }
 
 // With BASH_COMP_DEBUG_FILE set, completing a command line with a token, a control and a bidi
-// character leaves only the binary's redacted log in the file; the candidates are those of
+// character leaves only the binary's redacted log in the file, no line of the shell's; the candidates are those of
 // Cobra's own script. A shell that is not installed is skipped.
 func TestCompletionScriptsKeepTokensOutOfTheDebugFile(t *testing.T) {
 	bin := buildTaiga(t)
-	for _, shell := range completionShells {
-		t.Run(shell, func(t *testing.T) {
-			requireShell(t, completionHarness[shell].shell)
+	for _, harness := range []string{"bash", "zsh", "zsh-autoload", "fish", "powershell"} {
+		shell := strings.TrimSuffix(harness, "-autoload")
+		t.Run(harness, func(t *testing.T) {
+			requireShell(t, completionHarness[harness].shell)
 			for _, desc := range []bool{true, false} {
 				script := generatedScript(t, shell, desc)
-				_, debug := complete(t, shell, bin, script, "nope", "token=SWEEPSECRET", "a\u202eb", "x\x01y", "")
+				_, debug := complete(t, harness, bin, script, "nope", "token=SWEEPSECRET", "a\u202eb", "x\x01y", "")
 				if strings.Contains(debug, "SWEEPSECRET") || strings.ContainsAny(debug, "\u202e\x01") {
 					t.Errorf("descriptions %v: debug file leaked:\n%q", desc, debug)
+				}
+				for _, line := range strings.Split(strings.TrimSuffix(debug, "\n"), "\n") {
+					if !strings.HasPrefix(line, "[Debug] ") {
+						t.Errorf("descriptions %v: the shell wrote %q", desc, line)
+					}
 				}
 				if !strings.Contains(debug, "[Debug] [Error] unable to find a command for arguments: [nope token=…") {
 					t.Errorf("descriptions %v: the binary's own log is gone:\n%q", desc, debug)
@@ -348,8 +307,8 @@ func TestCompletionScriptsKeepTokensOutOfTheDebugFile(t *testing.T) {
 			for _, desc := range []bool{true, false} {
 				script, cobra := generatedScript(t, shell, desc), cobraScript(t, shell, desc)
 				for _, words := range [][]string{{"st"}, {"story", ""}, {"story", "l"}, {"story", "list", "--outp"}, {"story", "list", "--"}, {"completion", ""}, {"attachment", "upload", "--t"}} {
-					got, _ := complete(t, shell, bin, script, words...)
-					want, _ := complete(t, shell, bin, cobra, words...)
+					got, _ := complete(t, harness, bin, script, words...)
+					want, _ := complete(t, harness, bin, cobra, words...)
 					t.Logf("descriptions %v, %q: %q", desc, words, got)
 					if got != want || got == "" {
 						t.Errorf("descriptions %v, %q: candidates %q, Cobra's script gives %q", desc, words, got, want)
