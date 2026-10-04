@@ -450,7 +450,9 @@ func TestStatusWriterReorderPostcondition(t *testing.T) {
 func TestStatusWriterReorderUncertainWithoutReread(t *testing.T) {
 	for _, status := range []int{502, 302} {
 		a := &statusAPI{bulkErr: &taiga.APIError{Status: status, Method: "POST", Path: "userstory-statuses/bulk_update_order"},
-			afterBulk: func(a *statusAPI) { a.listErr = &taiga.APIError{Status: 503, Method: "GET", Path: "userstory-statuses"} }}
+			afterBulk: func(a *statusAPI) {
+				a.listErr = &taiga.APIError{Status: 503, Method: "GET", Path: "userstory-statuses"}
+			}}
 		err := loaded(t, a).Reorder(context.Background(), reordered)
 		if e := output.AsError(err); e.Code != "status_order_unconfirmed" || e.Exit != output.ExitUnexpected || len(a.bulks) != 1 {
 			t.Fatalf("%d: %v", status, err)
