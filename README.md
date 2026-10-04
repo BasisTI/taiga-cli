@@ -8,14 +8,26 @@
 
 ## Install
 
-Install the binary in `~/.local/bin` (it must be on your `PATH`). Download the tarball for your platform from [GitHub Releases](https://github.com/BasisTI/taiga-cli/releases), together with `SHA256SUMS`, and check it before installing:
+Install the binary in `~/.local/bin` (it must be on your `PATH`). The commands below use `v0.3.0`, which exists only once that release is published; until then, use the latest tag on [GitHub Releases](https://github.com/BasisTI/taiga-cli/releases).
+
+Download the tarball for your platform together with `SHA256SUMS`; the binary is installed only if its checksum matches. The block runs in a subshell with `set -eu`, so any failing step (download, a missing or failed checksum, extraction) stops it before anything is installed, and your shell stays open. On macOS, where `sha256sum` may be missing, it uses `shasum -a 256`:
 
 ```sh
-V=0.3.0
-gh release download "v$V" -R BasisTI/taiga-cli -p "taiga_${V}_linux_amd64.tar.gz" -p SHA256SUMS
-sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf "taiga_${V}_linux_amd64.tar.gz" taiga
-mkdir -p ~/.local/bin && install -m 0755 taiga ~/.local/bin/taiga
+(
+  set -eu
+  V=0.3.0
+  P=linux_amd64   # linux_arm64, darwin_amd64 or darwin_arm64
+  F="taiga_${V}_${P}.tar.gz"
+  cd "$(mktemp -d)"
+  gh release download "v$V" -R BasisTI/taiga-cli -p "$F" -p SHA256SUMS
+  awk -v f="$F" '$2 == f' SHA256SUMS > checksum
+  test -s checksum || { echo "$F is not in SHA256SUMS" >&2; exit 1; }
+  if command -v sha256sum >/dev/null; then sha256sum -c checksum; else shasum -a 256 -c checksum; fi
+  tar -xzf "$F" taiga
+  mkdir -p "$HOME/.local/bin"
+  install -m 0755 taiga "$HOME/.local/bin/taiga"
+  "$HOME/.local/bin/taiga" version
+)
 ```
 
 Or, with Go:
@@ -29,7 +41,8 @@ GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.3.
 [`skills/taiga-cli/SKILL.md`](skills/taiga-cli/SKILL.md) teaches coding agents to use the CLI (in Portuguese): which command to use, how to stop and ask a person on authentication errors, and what to check after an uncertain write instead of repeating it. Install it with the [skills CLI](https://github.com/vercel-labs/skills):
 
 ```sh
-npx skills add BasisTI/taiga-cli
+npx skills add BasisTI/taiga-cli --global   # for every project
+npx skills update --global --yes            # the installed copy never updates itself
 ```
 
 ## Quickstart

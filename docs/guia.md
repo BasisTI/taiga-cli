@@ -4,12 +4,13 @@ Guia curto para a equipe. A referência completa está no [README](../README.md)
 
 ## Instalação
 
-O binário vai em `~/.local/bin`, como o `sgo`. O caminho principal é o tar.gz da [release](https://github.com/BasisTI/taiga-cli/releases), conferido pelo `SHA256SUMS`; a alternativa é `GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.3.0`. Os comandos estão na seção "Install" do README.
+O binário vai em `~/.local/bin`, como o `sgo`. O caminho principal é o tar.gz da [release](https://github.com/BasisTI/taiga-cli/releases), conferido pelo `SHA256SUMS` antes de instalar; a alternativa é `GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.3.0`. Os comandos estão na seção "Install" do README. Os exemplos com `v0.3.0` só funcionam depois de publicada essa release.
 
 Agentes usam a CLI pela skill [`taiga-cli`](../skills/taiga-cli/SKILL.md), que mora neste repositório e é instalada pelo skills CLI:
 
 ```sh
-npx skills add BasisTI/taiga-cli
+npx skills add BasisTI/taiga-cli --global   # para todos os projetos
+npx skills update --global --yes            # a cópia instalada não se atualiza sozinha
 ```
 
 A skill diz ao agente qual comando usar, que ele para e pede o login a uma pessoa nos erros de autenticação, e o que conferir depois de uma escrita incerta em vez de repeti-la. Quando a CLI e o MCP do Taiga estão disponíveis, a CLI tem precedência; não é aconselhado manter os dois.

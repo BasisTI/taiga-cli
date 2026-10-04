@@ -5,22 +5,35 @@ login e não edita a config do Codex: quando faltar algum destes passos, ele par
 
 ## Binário em `~/.local/bin`
 
-Caminho principal: o tar.gz da release, conferido pelo `SHA256SUMS`. Exemplo para Linux
-amd64 (troque `linux_amd64` por `linux_arm64`, `darwin_amd64` ou `darwin_arm64`):
+Os comandos usam a `v0.3.0`, que só existe depois de publicada a release; antes disso,
+use a última tag de [Releases](https://github.com/BasisTI/taiga-cli/releases).
+
+Caminho principal: o tar.gz da release, conferido pelo `SHA256SUMS`. Ajuste `P` para a
+plataforma (`linux_amd64`, `linux_arm64`, `darwin_amd64` ou `darwin_arm64`). O bloco roda
+num subshell com `set -eu`: qualquer passo que falhe (download, checksum ausente ou
+`FAILED`, extração) interrompe antes de instalar, sem fechar o seu shell. No macOS, sem
+`sha256sum`, ele usa `shasum -a 256`.
 
 ```sh
-V=0.3.0
-cd "$(mktemp -d)"
-gh release download "v$V" -R BasisTI/taiga-cli -p "taiga_${V}_linux_amd64.tar.gz" -p SHA256SUMS
-sha256sum -c SHA256SUMS --ignore-missing      # macOS: grep "taiga_${V}_darwin_arm64" SHA256SUMS | shasum -a 256 -c
-tar -xzf "taiga_${V}_linux_amd64.tar.gz" taiga
-mkdir -p ~/.local/bin && install -m 0755 taiga ~/.local/bin/taiga
-taiga version
+(
+  set -eu
+  V=0.3.0
+  P=linux_amd64   # linux_arm64, darwin_amd64 ou darwin_arm64
+  F="taiga_${V}_${P}.tar.gz"
+  cd "$(mktemp -d)"
+  gh release download "v$V" -R BasisTI/taiga-cli -p "$F" -p SHA256SUMS
+  awk -v f="$F" '$2 == f' SHA256SUMS > checksum
+  test -s checksum || { echo "$F is not in SHA256SUMS" >&2; exit 1; }
+  if command -v sha256sum >/dev/null; then sha256sum -c checksum; else shasum -a 256 -c checksum; fi
+  tar -xzf "$F" taiga
+  mkdir -p "$HOME/.local/bin"
+  install -m 0755 taiga "$HOME/.local/bin/taiga"
+  "$HOME/.local/bin/taiga" version
+)
 ```
 
-Sem `gh`, baixe os dois arquivos pela página
-[Releases](https://github.com/BasisTI/taiga-cli/releases) e siga a partir do `sha256sum`.
-Uma linha `FAILED` no `sha256sum` encerra a instalação: não use o binário.
+Sem `gh`, baixe o tar.gz e o `SHA256SUMS` pela página de releases para um diretório
+vazio, entre nele e rode o mesmo bloco sem as linhas do `cd` e do `gh`.
 
 Alternativa, com Go instalado:
 

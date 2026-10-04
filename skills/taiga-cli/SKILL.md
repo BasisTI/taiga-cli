@@ -106,8 +106,10 @@ Detalhes de cada flag: `taiga <comando> --help`. Comportamento de cada comando:
 - **Board da Basis.** O arquivo canônico do fluxo da `basis-ci-gitlab` (status `In revision`
   e `Waiting for deployment` e os 6 campos de registro) é o
   [`docs/examples/taiga-project.toml`](https://github.com/BasisTI/taiga-cli/blob/main/docs/examples/taiga-project.toml).
-  `taiga project plan` só lê; o `apply` exige admin do projeto (`admin_project_values`) e
-  nunca altera nem apaga o que já existe.
+  `taiga project plan` só lê; o `apply` exige admin do projeto (`admin_project_values`),
+  cria só os status e campos que faltam e nunca altera nem apaga uma definição existente
+  (nome, cor, `closed`, tipo, descrição). A ordem dos status existentes pode mudar: quando
+  o `after` exige, o `apply` grava a ordem inteira numa requisição `bulk_update_order`.
 - **Escrita com `version`.** `story update`, `task update`, `close` e `field set` mandam a
   `version` lida. `version_conflict` (exit 4) quer dizer que nada foi gravado: releia e
   repita.
