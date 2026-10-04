@@ -690,3 +690,60 @@ Consequências na CLI:
   já vinculado à story conta como antigo e é removido.
 - Sem `modify_epic`, `epic link` sai com `forbidden` (exit 6); o check `project` do `auth status --diagnose` já lista
   a permissão ausente.
+
+## Fase 3 — tasks (US #253, PR 253-3)
+
+Observado no Taiga local (`compose.test.yml`, `taigaio/taiga-back:6.7.3`) em 2026-10-03, com `admin` e `svc` (membro
+convidado por e-mail) em projetos descartáveis (`cli-test-probe-tasks-<sufixo>` e `-other-`). Teste em
+`internal/taiga/tasks_probe_integration_test.go`: `go test -tags integration -run '^TestProbeTaskContract$' -v
+./internal/taiga`.
+
+### Criação e leitura
+
+| Requisição | Resultado |
+|---|---|
+| `POST tasks {project, user_story, subject, status, tags, assigned_to, due_date}` | 201; `version` 1; tags em pares `[nome, cor]`, minúsculas; **sem `assigned_users`** (um responsável só, `assigned_to`); traz `owner`, `user_story`, `milestone` (o da story), `is_closed`, `due_date`, `due_date_reason`, `due_date_status`, `is_blocked`, `blocked_note`, `created_date` |
+| `ref` da task | **mesma sequência das stories** do projeto (stories 1 e 2, task 3) |
+| `POST` mínimo (`project`, `user_story`, `subject`) | `description` `""`, `tags` `[]`, `due_date` e `assigned_to` `null`, `status` = `default_task_status` do projeto (`GET projects/<id>`), `is_blocked` `false`, `blocked_note` `""`, `attachments` `[]`, `is_closed` `false`, `version` 1 (também na releitura). Registro de contrato: a CLI não usa esses padrões para decidir um `task create` incerto, que é sempre `task_create_unconfirmed` (decisão de 2026-10-03) |
+| sprint da task | **herda a da story**: task criada numa story da sprint 1 nasce com `milestone` 1; a story passa para a sprint 2 e a task acompanha. Por isso a CLI não tem `--milestone` em task |
+| `POST tasks` sem `user_story` | 201, `user_story: null` (a CLI exige `--story`; task solta só por `taiga api`) |
+| `user_story` de outro projeto | **400** `WrongArguments` "You don't have permissions to set this user story to this task." |
+| `due_date` fora de `AAAA-MM-DD` (`31/12/2026`, `2026-02-30`) | **400** "Date has wrong format" |
+| `tasks/by_ref?project=<este>&ref=<ref>` com ref que só existe em outro projeto, ou que é uma **story** deste | **404**; `userstories/by_ref` com ref de task também dá 404 |
+
+### Filtros da listagem `GET tasks?project=<id>`
+
+| Parâmetro | Resultado |
+|---|---|
+| `user_story`, `status`, `assigned_to`, `tags`, `q`, `status__is_closed` | respeitados |
+| `ref`, `user_story__isnull` | **ignorados** (lista inteira) |
+
+A CLI manda os respeitados e confere todos localmente depois do `GetAll` (Review Focus 6).
+
+### OCC e `assigned_to`
+
+Ao contrário da story, `assigned_to` **entra no `diff` do histórico da task**, e o OCC por campo o protege:
+
+| Requisição | Resultado |
+|---|---|
+| outra escrita troca `assigned_to`; depois `PATCH {version antiga, assigned_to}` | **400** "The version doesn't match with the current one" |
+| a mesma `version` antiga com só `subject` | 200 (campo não alterado desde então) |
+
+Consequência: a task **não** precisa da releitura antes e da pós-condição de responsáveis da #247. `assigned_to` da
+task segue o caminho normal de `WriteVersionedFrom` (uma repetição só se nenhum campo enviado mudou), porque a
+resposta mostra o valor gravado inteiro.
+
+### Bloqueio, `due_date`, status fechado
+
+- Bloqueio igual ao da story: `blocked_note` sem `is_blocked` é descartada; `is_blocked: false` limpa a nota.
+- `due_date: null` limpa; `due_date_reason` é texto livre e independente (a CLI não o expõe).
+- `task-statuses` do template padrão: `New`, `In progress`, `Ready for test`, `Needs Info` abertos e **um só fechado**, `Closed`. Mudar para o status fechado põe
+  `is_closed: true` e `finished_date`.
+
+### Comentários
+
+- `PATCH tasks/<id> {comment, version antiga}` é aceito (o comentário não é campo da task), como na story.
+- `GET history/task/<id>?type=comment` tem o mesmo formato e a mesma ordem (mais novo primeiro) de
+  `history/userstory/<id>`.
+- Texto da integração GitLab para task: sem evidência; o modelo "This issue has been mentioned…" já está em
+  `SystemComment`. Pendente se aparecer outro modelo.

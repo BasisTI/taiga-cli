@@ -31,7 +31,7 @@ func tagNames(flag string, tags []string) ([]string, error) {
 
 func (a *App) storyCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "story", Short: "Read and update user stories"}
-	cmd.AddCommand(a.storyListCmd(), a.storyGetCmd(), a.storyWriteCmd(false), a.storyWriteCmd(true), a.storyCloseCmd(), a.storyFieldCmd(), a.storyCommentCmd(), a.storyCommentsCmd())
+	cmd.AddCommand(a.storyListCmd(), a.storyGetCmd(), a.storyWriteCmd(false), a.storyWriteCmd(true), a.storyCloseCmd(), a.fieldValuesCmd("story"), a.commentCmd("story"), a.commentsCmd("story"))
 	return cmd
 }
 
@@ -304,10 +304,90 @@ func resolveAssignees(cmd *cobra.Command, service *app.Service, patch *app.Patch
 	return nil
 }
 
+// itemFlags are the create and update flags that stories and tasks share.
+type itemFlags struct {
+	subject, descriptionFile, appendText, status string
+	tags, addTags, removeTags                    []string
+	dry, force                                   bool
+}
+
+func (fl *itemFlags) register(cmd *cobra.Command, what string, update bool) {
+	f := cmd.Flags()
+	f.StringVar(&fl.subject, "subject", "", what+" subject")
+	f.StringVar(&fl.descriptionFile, "description-file", "", "read the description from FILE, or - for stdin")
+	f.StringVar(&fl.status, "status", "", "status name or id")
+	f.StringArrayVar(&fl.tags, "tag", nil, "set the tags, repeatable (replaces the current ones)")
+	if update {
+		f.StringVar(&fl.appendText, "append-description", "", "append text to the description, after a blank line")
+		f.StringArrayVar(&fl.addTags, "add-tag", nil, "add a tag, repeatable")
+		f.StringArrayVar(&fl.removeTags, "remove-tag", nil, "remove a tag, repeatable")
+	}
+	f.BoolVar(&fl.dry, "dry-run", false, "print the request without sending it")
+	f.BoolVar(&fl.force, "force-version", false, "on a version conflict, retry even if the same fields changed")
+}
+
+// patch checks the shared flags before any request and returns the patch they ask for. The
+// status is left to the caller, which resolves it in its own catalog.
+func (fl *itemFlags) patch(a *App, cmd *cobra.Command, update bool) (app.Patch, error) {
+	f := cmd.Flags()
+	if (!update || f.Changed("subject")) && strings.TrimSpace(fl.subject) == "" {
+		return app.Patch{}, app.Usage("--subject cannot be blank")
+	}
+	if !update && fl.force {
+		return app.Patch{}, app.Usage("--force-version is not valid for creation")
+	}
+	if f.Changed("description-file") && f.Changed("append-description") {
+		return app.Patch{}, app.Usage("choose --description-file or --append-description")
+	}
+	if f.Changed("tag") && (len(fl.addTags)+len(fl.removeTags) > 0) {
+		return app.Patch{}, app.Usage("choose --tag (replace) or --add-tag/--remove-tag (merge)")
+	}
+	replace, err := tagNames("--tag", fl.tags)
+	if err != nil {
+		return app.Patch{}, err
+	}
+	add, err := tagNames("--add-tag", fl.addTags)
+	if err != nil {
+		return app.Patch{}, err
+	}
+	remove, err := tagNames("--remove-tag", fl.removeTags)
+	if err != nil {
+		return app.Patch{}, err
+	}
+	for _, x := range add {
+		for _, y := range remove {
+			if x == y {
+				return app.Patch{}, app.Usage("tag cannot be added and removed together: " + x)
+			}
+		}
+	}
+	if f.Changed("status") && strings.TrimSpace(fl.status) == "" {
+		return app.Patch{}, app.Usage("--status cannot be blank")
+	}
+	patch := app.Patch{Set: app.Object{}, AddTags: add, RemoveTags: remove}
+	if f.Changed("subject") {
+		patch.Set["subject"] = fl.subject
+	}
+	if f.Changed("description-file") {
+		text, err := a.readContent(fl.descriptionFile)
+		if err != nil {
+			return app.Patch{}, err
+		}
+		patch.Set["description"] = text
+	}
+	if f.Changed("append-description") {
+		patch.Append = &fl.appendText
+	}
+	if f.Changed("tag") {
+		patch.Set["tags"] = app.MergeNames(nil, replace, nil)
+	}
+	return patch, nil
+}
+
 func (a *App) storyWriteCmd(update bool) *cobra.Command {
-	var subject, descriptionFile, appendText, status, epic, replaceEpic, milestone, swimlane string
-	var tags, addTags, removeTags []string
-	var dry, force, confirmDelete bool
+	var fl itemFlags
+	var epic, replaceEpic, milestone, swimlane string
+	var confirmDelete bool
 	use, short := "create", "Create a story"
 	args := cobra.NoArgs
 	if update {
@@ -321,38 +401,7 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 				return err
 			}
 		}
-		if (!update || f.Changed("subject")) && strings.TrimSpace(subject) == "" {
-			return app.Usage("--subject cannot be blank")
-		}
-		if !update && force {
-			return app.Usage("--force-version is not valid for creation")
-		}
-		if f.Changed("description-file") && f.Changed("append-description") {
-			return app.Usage("choose --description-file or --append-description")
-		}
-		if f.Changed("tag") && (len(addTags)+len(removeTags) > 0) {
-			return app.Usage("choose --tag (replace) or --add-tag/--remove-tag (merge)")
-		}
-		replace, err := tagNames("--tag", tags)
-		if err != nil {
-			return err
-		}
-		add, err := tagNames("--add-tag", addTags)
-		if err != nil {
-			return err
-		}
-		remove, err := tagNames("--remove-tag", removeTags)
-		if err != nil {
-			return err
-		}
-		for _, x := range add {
-			for _, y := range remove {
-				if x == y {
-					return app.Usage("tag cannot be added and removed together: " + x)
-				}
-			}
-		}
-		for _, name := range []string{"status", "milestone", "swimlane"} {
+		for _, name := range []string{"milestone", "swimlane"} {
 			if f.Changed(name) && strings.TrimSpace(f.Lookup(name).Value.String()) == "" {
 				return app.Usage("--" + name + " cannot be blank")
 			}
@@ -379,28 +428,15 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 		if err := checkAssigneeFlags(cmd, update); err != nil {
 			return err
 		}
-		patch := app.Patch{Set: app.Object{}, AddTags: add, RemoveTags: remove}
-		if f.Changed("subject") {
-			patch.Set["subject"] = subject
-		}
-		if f.Changed("description-file") {
-			text, err := a.readContent(descriptionFile)
-			if err != nil {
-				return err
-			}
-			patch.Set["description"] = text
-		}
-		if f.Changed("append-description") {
-			patch.Append = &appendText
-		}
-		if f.Changed("tag") {
-			patch.Set["tags"] = app.MergeNames(nil, replace, nil)
+		patch, err := fl.patch(a, cmd, update)
+		if err != nil {
+			return err
 		}
 		service, err := a.service(cmd)
 		if err != nil {
 			return err
 		}
-		for _, pair := range [][2]string{{"status", status}, {"milestone", milestone}, {"swimlane", swimlane}} {
+		for _, pair := range [][2]string{{"status", fl.status}, {"milestone", milestone}, {"swimlane", swimlane}} {
 			if !f.Changed(pair[0]) {
 				continue
 			}
@@ -430,38 +466,30 @@ func (a *App) storyWriteCmd(update bool) *cobra.Command {
 		var result any
 		switch {
 		case update && linked != nil:
-			result, err = service.UpdateStoryWithEpic(cmd.Context(), argv[0], patch, linked, replaceLinks, dry, force)
+			result, err = service.UpdateStoryWithEpic(cmd.Context(), argv[0], patch, linked, replaceLinks, fl.dry, fl.force)
 		case update:
-			result, err = service.UpdateStory(cmd.Context(), argv[0], patch, dry, force)
+			result, err = service.UpdateStory(cmd.Context(), argv[0], patch, fl.dry, fl.force)
 		case linked != nil:
-			result, err = service.CreateStoryWithEpic(cmd.Context(), patch.Set, linked, dry)
+			result, err = service.CreateStoryWithEpic(cmd.Context(), patch.Set, linked, fl.dry)
 		default:
-			result, err = service.CreateStory(cmd.Context(), patch.Set, dry)
+			result, err = service.CreateStory(cmd.Context(), patch.Set, fl.dry)
 		}
 		if err != nil {
 			return err
 		}
 		return a.renderCurated(result)
 	}
+	fl.register(cmd, "story", update)
 	f := cmd.Flags()
-	f.StringVar(&subject, "subject", "", "story subject")
-	f.StringVar(&descriptionFile, "description-file", "", "read the description from FILE, or - for stdin")
-	f.StringVar(&status, "status", "", "status name or id")
 	f.StringVar(&swimlane, "swimlane", "", "swimlane name or id")
 	f.StringVar(&epic, "epic", "", "link the story to this epic (reference), keeping its other epics")
-	f.StringArrayVar(&tags, "tag", nil, "set the tags, repeatable (replaces the current ones)")
 	if update {
-		f.StringVar(&appendText, "append-description", "", "append text to the description, after a blank line")
 		f.StringVar(&milestone, "milestone", "", "milestone (sprint) name or id")
 		f.Bool("clear-swimlane", false, "remove the story from its swimlane")
 		f.StringVar(&replaceEpic, "replace-epic", "", "make this epic (reference) the story's only epic: links it, then removes the others (requires --confirm-delete)")
 		f.BoolVar(&confirmDelete, "confirm-delete", false, "required with --replace-epic: it deletes the other epic links")
-		f.StringArrayVar(&addTags, "add-tag", nil, "add a tag, repeatable")
-		f.StringArrayVar(&removeTags, "remove-tag", nil, "remove a tag, repeatable")
 	}
 	assigneeFlags(cmd, update)
-	f.BoolVar(&dry, "dry-run", false, "print the request without sending it")
-	f.BoolVar(&force, "force-version", false, "on a version conflict, retry even if the same fields changed")
 	return cmd
 }
 

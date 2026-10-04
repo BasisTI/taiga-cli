@@ -233,7 +233,13 @@ Flags comuns: `--project`, `--output`, `--dry-run` (em escritas).
 |---|---|
 | `taiga epic list [--search] [--closed[=false]]` / `taiga epic get REF` | Épicos (com `url`) e detalhe com as stories vinculadas; recusados com `not_found` quando o módulo de épicos está desligado (a API continua servindo) |
 | `taiga epic link EPIC_REF STORY_REF [--replace --confirm-delete] [--dry-run]` | Acrescenta o épico aos da story; com `--replace`, cria o vínculo novo **antes** de apagar os outros (único `DELETE` curado, exige `--confirm-delete` também no `--dry-run`). Sem `version` no vínculo: releitura antes do `POST`, pós-condição depois, rerun converge (400 de duplicata e 404 de `DELETE` repetido contam como feitos após releitura). `--epic` em `story create/update` acrescenta; `story create --epic` que falha no vínculo sai `story_created_link_failed`, nomeando a story criada (PR 253-2) |
-| `taiga task list [--story REF] \| get \| create --story REF ... \| update \| close` | Tasks com os mesmos padrões de responsáveis, status, tags, `version` e campos |
+| `taiga task list [--story REF] [--status] [--assignee USER\|me] [--tag]... [--search] [--closed[=false]]` | Listagem sem paginação manual; `user_story`, `status`, `assigned_to` e `status__is_closed` vão ao servidor e todo filtro é conferido localmente (PR 253-3) |
+| `taiga task get REF\|--id ID` | Detalhe por `tasks/by_ref`, com `url` (`/project/<slug>/task/<ref>`) e campos customizados |
+| `taiga task create --story REF --subject S [--description-file F] [--status] [--tag]... [--assignee USER] [--due-date AAAA-MM-DD]` | Criação na story (task sem story só por `taiga api`; sem `--milestone`, a task fica na sprint da story). `POST` enviado uma vez; resposta inconclusiva → sempre `task_create_unconfirmed` (exit 1), com as candidatas da story (ref e id) para inspeção; nunca sucesso (decisão de 2026-10-03) |
+| `taiga task update REF [flags]` | `--subject`, `--description-file`, `--append-description`, `--status`, `--tag`, `--add-tag`, `--remove-tag`, `--assignee`, `--clear-assignee`, `--block NOTE`, `--unblock`, `--due-date`, `--clear-due-date`, `--force-version`. `assigned_to` é protegido pelo OCC da task (entra no `diff`); resposta inconclusiva → releitura, `task_update_unconfirmed` (exit 1) |
+| `taiga task close REF [--status NAME]` | Só muda o status; sem a tag de arquivo do MCP |
+| `taiga task field list REF` / `taiga task field set REF "Nome"=valor... [--unset NOME]...` | Valores dos campos customizados da task, como em story |
+| `taiga task comment REF --body TEXT\|--body-file F` / `taiga task comments REF [--include-system]` | Comentários pelo `PATCH tasks/<id>` e pelo `history/task` |
 
 **Projeto como código:**
 - `plan` compara o arquivo com o projeto e imprime as ações.
@@ -297,6 +303,8 @@ Os testes nunca escrevem na instância `agile.basis.com.br`. Um smoke test manua
 | 3 | #252 | Swimlanes |
 | 3 | #253 | Paridade com o MCP: projetos, usuários, milestones, épicos, tasks |
 | 4 | #254 | Skill `skills/taiga-cli/SKILL.md` e migração da `basis-ci-gitlab` |
+
+**Situação (2026-10-03):** fases 1 e 2 entregues; a fase 3 fica completa com o PR 253-3 (tasks), último dos três PRs da #253, depois de #251 e #252.
 
 **Fluxo de trabalho:**
 - Uma branch `TG-<ref>` e um PR por US, com squash no merge.

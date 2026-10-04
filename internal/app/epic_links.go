@@ -356,7 +356,7 @@ func (s *Service) UpdateStoryWithEpic(ctx context.Context, ref string, p Patch, 
 	if dry {
 		plan := LinkPlan{DryRun: true, Requests: []WritePlan{}}
 		if len(patch) > 0 {
-			written, err := s.updateFrom(ctx, before, p, true, force)
+			written, err := s.updateFrom(ctx, storyKind, before, p, true, force)
 			if err != nil {
 				return nil, err
 			}
@@ -373,7 +373,7 @@ func (s *Service) UpdateStoryWithEpic(ctx context.Context, ref string, p Patch, 
 	}
 	var written any
 	if len(patch) > 0 {
-		if written, err = s.updateFrom(ctx, before, p, false, force); err != nil {
+		if written, err = s.updateFrom(ctx, storyKind, before, p, false, force); err != nil {
 			return nil, err
 		}
 	}

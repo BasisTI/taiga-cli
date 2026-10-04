@@ -109,7 +109,9 @@ type storyFake struct {
 	// resources by path. Both are created lazily by the field tests.
 	defs   map[string][]map[string]any
 	values map[string]map[string]any
-	tasks  map[int64]map[string]any
+	// tasks are served like stories (tasks, tasks/by_ref, tasks/<id>), with taskStatuses.
+	tasks        map[int64]map[string]any
+	taskStatuses []map[string]any
 	// onDefPost runs before a definition POST is handled (to simulate a concurrent create).
 	onDefPost func()
 	// onValues runs on each GET or PATCH of a values resource, before it is handled.
@@ -118,6 +120,10 @@ type storyFake struct {
 	onPatchValues func(v map[string]any)
 	// badValuesWrite makes a successful values PATCH answer with a body that is not JSON.
 	badValuesWrite bool
+	// valuesStatus answers a values PATCH, after applying it, with this status and no body;
+	// postStatus does the same for a POST of a story or task.
+	valuesStatus int
+	postStatus   int
 	// truncate makes a successful write answer cut short after the status line (the connection
 	// drops mid-body), for every write.
 	truncate bool
@@ -158,6 +164,18 @@ func newStoryFake(t *testing.T) (*storyFake, *[]recorded) {
 				"status": 1, "is_closed": false, "tags": []any{}, "assigned_users": []any{6}, "epics": nil},
 			7001: {"id": 7001, "ref": 246, "project": 38, "version": 1, "subject": "other project", "tags": []any{}},
 		},
+		tasks: map[int64]map[string]any{
+			9100: {"id": 9100, "ref": 250, "project": 37, "version": 4, "subject": "Escrever testes", "description": "linha", "user_story": 6808,
+				"status": 11, "is_closed": false, "tags": []any{[]any{"cli", nil}}, "assigned_to": 5, "owner": 5, "is_blocked": false, "blocked_note": "", "due_date": nil},
+			9101: {"id": 9101, "ref": 251, "project": 37, "version": 1, "subject": "Revisar", "description": "", "user_story": 6809,
+				"status": 13, "is_closed": true, "tags": []any{}, "assigned_to": nil, "owner": 6, "is_blocked": false, "blocked_note": "", "due_date": nil},
+			9200: {"id": 9200, "ref": 250, "project": 38, "version": 1, "subject": "other project", "tags": []any{}},
+		},
+		taskStatuses: []map[string]any{
+			{"id": 11, "name": "New", "is_closed": false, "project": 37},
+			{"id": 12, "name": "In progress", "is_closed": false, "project": 37},
+			{"id": 13, "name": "Closed", "is_closed": true, "project": 37},
+		},
 		statuses: []map[string]any{
 			{"id": 1, "name": "New", "is_closed": false, "project": 37},
 			{"id": 3, "name": "In progress", "is_closed": false, "project": 37},
@@ -177,6 +195,8 @@ func newStoryFake(t *testing.T) (*storyFake, *[]recorded) {
 			"userstories/custom-attributes-values/6809": {"attributes_values": map[string]any{}, "version": 1, "user_story": 6809},
 			"userstories/custom-attributes-values/6810": {"attributes_values": map[string]any{}, "version": 1, "user_story": 6810},
 			"userstories/custom-attributes-values/7001": {"attributes_values": map[string]any{}, "version": 1, "user_story": 7001},
+			"tasks/custom-attributes-values/9100":       {"attributes_values": map[string]any{}, "version": 3, "task": 9100},
+			"tasks/custom-attributes-values/9101":       {"attributes_values": map[string]any{}, "version": 1, "task": 9101},
 		},
 	}
 	srv, calls := fakeTaiga(t, f.handle)
@@ -236,7 +256,7 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == "GET" && (path == "projects/37" || path == "projects/by_slug" && q.Get("slug") == f.slug):
-		f.write(w, map[string]any{"id": 37, "slug": f.slug, "default_swimlane": f.defaultSwimlane})
+		f.write(w, map[string]any{"id": 37, "slug": f.slug, "default_swimlane": f.defaultSwimlane, "default_task_status": 11})
 	case r.Method == "GET" && path == "swimlanes" && project():
 		f.list(w, r, f.swimlanes)
 	case r.Method == "GET" && path == "userstory-statuses" && project():
@@ -253,9 +273,12 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		f.write(w, map[string]any{"id": 5, "username": "admin"})
 	case r.Method == "GET" && path == "epics" && project():
 		f.list(w, r, f.epics)
-	case r.Method == "GET" && path == "userstories" && project():
+	case r.Method == "GET" && path == "task-statuses" && project():
+		f.list(w, r, f.taskStatuses)
+	case r.Method == "GET" && f.store(path) != nil && project():
+		store := f.store(path)
 		ids := []int64{}
-		for id, s := range f.stories {
+		for id, s := range store {
 			if fmt.Sprint(s["project"]) == "37" {
 				ids = append(ids, id)
 			}
@@ -263,11 +286,11 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 		items := []map[string]any{}
 		for _, id := range ids {
-			items = append(items, f.stories[id])
+			items = append(items, store[id])
 		}
 		f.list(w, r, items)
-	case r.Method == "GET" && path == "userstories/by_ref":
-		for _, s := range f.stories {
+	case r.Method == "GET" && (path == "userstories/by_ref" || path == "tasks/by_ref"):
+		for _, s := range f.store(strings.TrimSuffix(path, "/by_ref")) {
 			if fmt.Sprint(s["project"]) == q.Get("project") && fmt.Sprint(s["ref"]) == q.Get("ref") {
 				f.write(w, s)
 				return
@@ -275,9 +298,9 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(404)
 		_, _ = fmt.Fprint(w, `{"_error_message":"No UserStory matches the given query."}`)
-	case r.Method == "GET" && strings.HasPrefix(path, "userstories/"):
-		id, _ := strconv.ParseInt(strings.TrimPrefix(path, "userstories/"), 10, 64)
-		if s, ok := f.stories[id]; ok {
+	case r.Method == "GET" && f.store(head(path)) != nil:
+		id, _ := strconv.ParseInt(tail(path), 10, 64)
+		if s, ok := f.store(head(path))[id]; ok {
 			if f.onRead != nil {
 				f.onRead(s)
 			}
@@ -285,9 +308,9 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(404)
-	case r.Method == "PATCH" && strings.HasPrefix(path, "userstories/"):
-		id, _ := strconv.ParseInt(strings.TrimPrefix(path, "userstories/"), 10, 64)
-		s := f.stories[id]
+	case r.Method == "PATCH" && f.store(head(path)) != nil:
+		id, _ := strconv.ParseInt(tail(path), 10, 64)
+		s := f.store(head(path))[id]
 		if f.onPatch != nil {
 			f.onPatch(s)
 		}
@@ -320,11 +343,17 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.write(w, s)
-	case r.Method == "POST" && path == "userstories":
+	case r.Method == "POST" && f.store(path) != nil:
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.nextID++
 		s := map[string]any{"id": f.nextID, "ref": 300, "project": 37, "version": 1, "tags": []any{}, "status": 1}
+		if path == "tasks" { // the defaults the probe observed for a minimal POST
+			for k, v := range map[string]any{"ref": 301, "status": 11, "owner": 5, "is_closed": false, "description": "", "due_date": nil, "assigned_to": nil,
+				"is_blocked": false, "blocked_note": "", "milestone": nil, "attachments": []any{}} {
+				s[k] = v
+			}
+		}
 		for k, v := range body {
 			if k != "tags" && k != "project" {
 				s[k] = v
@@ -335,7 +364,11 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 				s["tags"] = append(s["tags"].([]any), []any{n, nil})
 			}
 		}
-		f.stories[f.nextID] = s
+		f.store(path)[f.nextID] = s
+		if f.postStatus != 0 {
+			w.WriteHeader(f.postStatus)
+			return
+		}
 		if f.truncate {
 			cut(w, 201)
 			return
@@ -351,6 +384,22 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 	}
 }
+
+// store is the map that serves base ("userstories" or "tasks"), nil for any other path.
+func (f *storyFake) store(base string) map[int64]map[string]any {
+	switch base {
+	case "userstories":
+		return f.stories
+	case "tasks":
+		return f.tasks
+	}
+	return nil
+}
+
+// head and tail split "userstories/6808" into the resource and the id.
+func head(path string) string { h, _, _ := strings.Cut(path, "/"); return h }
+
+func tail(path string) string { _, t, _ := strings.Cut(path, "/"); return t }
 
 func writes(calls *[]recorded) []recorded {
 	out := []recorded{}

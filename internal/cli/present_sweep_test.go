@@ -27,7 +27,13 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 			s["assigned_users_extra_info"] = []any{user()}
 			s["tags"] = []any{[]any{"token=SWEEPSECRET", nil}}
 		}
-		for _, st := range f.statuses {
+		for _, tk := range f.tasks {
+			tk["subject"] = "task " + sweepURL
+			tk["description"] = "see " + sweepURL + "\nnext line"
+			tk["owner_extra_info"], tk["assigned_to_extra_info"] = user(), user()
+			tk["tags"] = []any{[]any{"token=SWEEPSECRET", nil}}
+		}
+		for _, st := range append(f.statuses, f.taskStatuses...) {
 			st["color"] = sweepURL
 		}
 		f.swimlanes = []map[string]any{{"id": 21, "name": "lane " + sweepURL, "order": 1, "project": 37}}
@@ -39,6 +45,10 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 			e["user"] = user()
 			e["comment"] = "comment " + sweepURL
 		}
+		f.history[9100] = []map[string]any{{"id": "t1", "type": 1, "created_at": "2026-10-03T12:00:00.000Z", "comment": "task comment " + sweepURL, "user": user(),
+			"diff": map[string]any{}, "delete_comment_date": nil, "edit_comment_date": nil}}
+		f.defs["task-custom-attributes"][0]["description"] = sweepURL
+		f.values["tasks/custom-attributes-values/9100"]["attributes_values"] = map[string]any{"27": sweepURL}
 		f.defs["userstory-custom-attributes"][2]["description"] = sweepURL
 		f.values[values6808]["attributes_values"] = map[string]any{"29": sweepURL}
 		return f, f.env()
@@ -72,6 +82,12 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 		{"story", "update", "246", "--subject", "s", "--epic", "91"}, {"story", "update", "246", "--replace-epic", "91", "--confirm-delete"},
 		{"story", "update", "246", "--subject", "s", "--replace-epic", "91", "--confirm-delete", "--dry-run"},
 		{"story", "create", "--subject", "s", "--epic", "91"}, {"story", "create", "--subject", "s", "--epic", "91", "--dry-run"},
+		{"task", "get", "250"}, {"task", "list"}, {"task", "list", "--story", "246"}, {"task", "close", "250"}, {"task", "close", "250", "--dry-run"},
+		{"task", "create", "--story", "246", "--subject", "s " + sweepURL}, {"task", "create", "--story", "246", "--subject", "s " + sweepURL, "--dry-run"},
+		{"task", "update", "250", "--subject", "s"}, {"task", "update", "250", "--append-description", sweepURL, "--dry-run"},
+		{"task", "update", "250", "--block", sweepURL},
+		{"task", "field", "list", "250"}, {"task", "field", "set", "250", "Horas=x"}, {"task", "field", "set", "250", "Horas=" + sweepURL, "--dry-run"},
+		{"task", "comments", "250"}, {"task", "comment", "250", "--body", sweepURL}, {"task", "comment", "250", "--body", sweepURL, "--dry-run"},
 	} {
 		cases = append(cases, struct {
 			env   func() map[string]string
@@ -94,6 +110,12 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 		{failing("POST epics/9/related_userstories", 403), []string{"story", "create", "--subject", "s", "--epic", "91"}},
 		{failing("POST epics/9/related_userstories", 502), []string{"story", "update", "246", "--subject", "s", "--epic", "91"}},
 		{failing("DELETE epics/90/related_userstories/6808", 502), []string{"epic", "link", "91", "246", "--replace", "--confirm-delete"}},
+		{failing("POST tasks", 502), []string{"task", "create", "--story", "246", "--subject", "s"}},
+		{failing("POST tasks", 403), []string{"task", "create", "--story", "246", "--subject", "s"}},
+		{failing("PATCH tasks/9100", 502), []string{"task", "update", "250", "--append-description", "x"}},
+		{failing("PATCH tasks/9100", 302), []string{"task", "close", "250"}},
+		{failing("PATCH tasks/9100", 502), []string{"task", "comment", "250", "--body", "x"}},
+		{failing("PATCH tasks/custom-attributes-values/9100", 502), []string{"task", "field", "set", "250", "Horas=y"}},
 	} {
 		cases = append(cases, struct {
 			env   func() map[string]string
@@ -106,6 +128,16 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 		stdin string
 		args  []string
 	}{func() map[string]string { _, env := story(); return env }, sweepURL, []string{"story", "create", "--subject", "s", "--description-file", "-", "--dry-run"}})
+	// A create whose answer is lost names its candidates in the error.
+	cases = append(cases, struct {
+		env   func() map[string]string
+		stdin string
+		args  []string
+	}{func() map[string]string {
+		f, env := story()
+		f.postStatus = 502
+		return env
+	}, "", []string{"task", "create", "--story", "246", "--subject", "s " + sweepURL}})
 	for _, args := range [][]string{
 		{"project", "list"}, {"project", "get"}, {"user", "list"}, {"milestone", "list"}, {"epic", "list"}, {"epic", "get", "9"},
 		{"auth", "status", "--diagnose"},
@@ -117,7 +149,9 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 		}{catalog, "", args})
 	}
 	for _, args := range [][]string{{"project", "get"}, {"story", "get", "246"}, {"auth", "status"}, {"epic", "link", "9", "246"},
-		{"story", "update", "246", "--epic", "9"}, {"story", "create", "--subject", "s", "--epic", "9"}} {
+		{"story", "update", "246", "--epic", "9"}, {"story", "create", "--subject", "s", "--epic", "9"},
+		{"task", "get", "250"}, {"task", "list"}, {"task", "create", "--story", "246", "--subject", "s"}, {"task", "update", "250", "--subject", "s"},
+		{"task", "field", "list", "250"}, {"task", "comments", "250"}, {"task", "comment", "250", "--body", "x"}} {
 		cases = append(cases, struct {
 			env   func() map[string]string
 			stdin string

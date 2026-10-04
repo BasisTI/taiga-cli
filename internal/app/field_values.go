@@ -81,29 +81,35 @@ var owners = map[string][2]string{"story": {"userstories", "user_story"}, "task"
 // FieldValues reads the values of the story or task id, after checking that it belongs to the
 // selected project. A read error is returned as is, never as empty values.
 func (s *Service) FieldValues(ctx context.Context, kind string, id int64) (Object, error) {
+	values, _, err := s.fieldValues(ctx, kind, id)
+	return values, err
+}
+
+// fieldValues is FieldValues that also returns the story or task the values belong to.
+func (s *Service) fieldValues(ctx context.Context, kind string, id int64) (Object, Object, error) {
 	path, err := ValuePath(kind, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	owner := owners[kind]
 	o, err := Read(ctx, s.API, fmt.Sprintf("%s/%d", owner[0], id), nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if ID(o["project"]) != ID(s.Project["id"]) {
-		return nil, Usage(fmt.Sprintf("%s %d belongs to another project, not %v", kind, id, s.Project["slug"]))
+		return nil, nil, Usage(fmt.Sprintf("%s %d belongs to another project, not %v", kind, id, s.Project["slug"]))
 	}
 	values, err := Read(ctx, s.API, path, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if ID(values[owner[1]]) != id {
-		return nil, fmt.Errorf("GET %s returned the values of another %s", path, kind)
+		return nil, nil, fmt.Errorf("GET %s returned the values of another %s", path, kind)
 	}
 	if _, ok := values["attributes_values"].(map[string]any); !ok {
-		return nil, fmt.Errorf("GET %s: invalid attributes_values", path)
+		return nil, nil, fmt.Errorf("GET %s: invalid attributes_values", path)
 	}
-	return values, nil
+	return values, o, nil
 }
 
 // SetFieldValues merges the Name=value entries into the values of the story or task id, clears
@@ -155,7 +161,7 @@ func (s *Service) SetFieldValues(ctx context.Context, kind string, id int64, ent
 		}
 		cleared[key] = true
 	}
-	before, err := s.FieldValues(ctx, kind, id)
+	before, item, err := s.fieldValues(ctx, kind, id)
 	if err != nil {
 		return nil, err
 	}
@@ -176,16 +182,29 @@ func (s *Service) SetFieldValues(ctx context.Context, kind string, id int64, ent
 	if dry {
 		return WritePlan{true, "PATCH", path, Object{"attributes_values": merged, "version": before["version"]}}, nil
 	}
-	return s.writeValues(ctx, path, before, merged, force)
+	k, err := kindOf(kind)
+	if err != nil {
+		return nil, err
+	}
+	return s.writeValues(ctx, k, path, before, merged, fmt.Sprintf("`taiga %s field list %v`", k.name, item["ref"]), force)
 }
 
 // writeValues sends the merged dictionary once. Taiga's OCC never refuses an old version on
 // this resource (docs/api-notes.md), so the version cannot prevent a lost update: the answer is
 // checked instead. It must be the next version of the read that computed the merge and hold
 // exactly the dictionary sent; otherwise another write landed in between, which is reported
-// as applied and never retried. --force-version skips the check.
-func (s *Service) writeValues(ctx context.Context, path string, before, merged Object, force bool) (Object, error) {
+// as applied and never retried. --force-version skips the check. check is the command that
+// shows the values, for the recovery.
+func (s *Service) writeValues(ctx context.Context, k kind, path string, before, merged Object, check string, force bool) (Object, error) {
+	patch := Object{"attributes_values": merged}
 	resp, err := confirmed(s.API.Do(ctx, taiga.Request{Method: "PATCH", Path: path, Body: map[string]any{"attributes_values": merged, "version": before["version"]}}))
+	if err != nil && k.confirmUncertain && uncertain(err) {
+		next := ID(before["version"]) + 1
+		if force {
+			next = 0 // --force-version skips the version check; the values are still compared
+		}
+		return s.confirmPatch(ctx, k, path, patch, next, err, check)
+	}
 	if err != nil {
 		var ae *taiga.APIError
 		if errors.As(err, &ae) && ae.IsVersionConflict() {
@@ -195,7 +214,7 @@ func (s *Service) writeValues(ctx context.Context, path string, before, merged O
 	}
 	after, err := reread(ctx, s.API, "PATCH", path, path, resp)
 	if err != nil {
-		return nil, err
+		return nil, k.applied(err, check)
 	}
 	if force {
 		return after, nil
@@ -217,7 +236,7 @@ func (s *Service) writeValues(ctx context.Context, path string, before, merged O
 		return nil, &output.Error{Code: "field_values_postcondition_failed", Source: "api", Stage: "PATCH " + path,
 			Cause: fmt.Sprintf("the change was applied (PATCH %s returned HTTP %d), but %s; now attributes_values=%s (version %v)",
 				path, resp.Status, strings.Join(problems, "; "), jsonText(after["attributes_values"]), after["version"]),
-			Recovery: "do not re-run the command blindly: someone else wrote the custom fields at the same time and Taiga does not detect it; check them with `taiga story field list` and set what is missing",
+			Recovery: "do not re-run the command blindly: someone else wrote the custom fields at the same time and Taiga does not detect it; check them with " + check + " and set what is missing",
 			Exit:     output.ExitConflict}
 	}
 	return after, nil

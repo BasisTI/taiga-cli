@@ -72,6 +72,7 @@ func (a *App) root() *cobra.Command {
 	root.AddCommand(a.apiCmd())
 	root.AddCommand(a.authCmd())
 	root.AddCommand(a.storyCmd())
+	root.AddCommand(a.taskCmd())
 	root.AddCommand(a.fieldCmd())
 	root.AddCommand(a.projectCmd())
 	root.AddCommand(a.statusCmd())

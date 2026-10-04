@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"sort"
 	"strconv"
 
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -175,7 +176,7 @@ type WritePlan struct {
 
 // Write sends patch against before (the read used to compute it) and re-reads the resource.
 // An empty patch writes nothing and returns before.
-func (s *Service) Write(ctx context.Context, path string, before, patch Object, dry, force bool) (any, error) {
+func (s *Service) Write(ctx context.Context, k kind, path string, before, patch Object, dry, force bool) (any, error) {
 	if len(patch) == 0 {
 		return before, nil
 	}
@@ -190,30 +191,108 @@ func (s *Service) Write(ctx context.Context, path string, before, patch Object, 
 		body["version"] = before["version"]
 		return WritePlan{true, "PATCH", path, body}, nil
 	}
-	resp, err := s.send(ctx, path, before, patch, force)
-	if err != nil {
-		return nil, err
-	}
-	return reread(ctx, s.API, "PATCH", path, path, resp)
-}
-
-// send writes patch with the version of before: once for opaque fields, else with the guarded retry.
-func (s *Service) send(ctx context.Context, path string, before, patch Object, force bool) (*taiga.Response, error) {
-	var resp *taiga.Response
-	var err error
-	if opaque(patch) && !force {
-		resp, err = s.writeOnce(ctx, path, before, patch)
-	} else {
-		var raw map[string]json.RawMessage
-		if raw, err = Snapshot(before); err != nil {
-			return nil, err
-		}
-		resp, err = confirmed(s.API.WriteVersionedFrom(ctx, "PATCH", path, patch, raw, force))
+	resp, err := s.send(ctx, k, path, before, patch, force)
+	if err != nil && k.confirmUncertain && uncertain(err) {
+		return s.confirmPatch(ctx, k, path, patch, 0, err, fmt.Sprintf("`taiga %s get %v`", k.name, before["ref"]))
 	}
 	if err != nil {
 		return nil, taiga.ToOutput(err)
 	}
-	return resp, nil
+	o, err := reread(ctx, s.API, "PATCH", path, path, resp)
+	return o, k.applied(err, fmt.Sprintf("`taiga %s get %v`", k.name, before["ref"]))
+}
+
+// send writes patch with the version of before: once for opaque fields of a story, else with
+// the guarded retry. The error is the client's, so the caller can tell an unknown outcome.
+func (s *Service) send(ctx context.Context, k kind, path string, before, patch Object, force bool) (*taiga.Response, error) {
+	if k.fenceAssignees && opaque(patch) && !force {
+		return s.writeOnce(ctx, path, before, patch)
+	}
+	raw, err := Snapshot(before)
+	if err != nil {
+		return nil, err
+	}
+	return confirmed(s.API.WriteVersionedFrom(ctx, "PATCH", path, patch, raw, force))
+}
+
+// uncertain is a failed write that Taiga may have applied: the request left (the connection
+// opened) and no answer said what happened: a network error, a 5xx, or a 3xx, which the client
+// never follows and a proxy may have answered after passing the request on.
+func uncertain(err error) bool {
+	var ae *taiga.APIError
+	return !taiga.NotSent(err) && (unknownOutcome(err) || errors.As(err, &ae) && ae.Status >= 300 && ae.Status < 400)
+}
+
+// unsure is a failed write whose outcome the kind decides by checking: for a task, any uncertain
+// one; for a story, a network error after the connection opened or a 5xx (a 3xx stays an error
+// until US #274).
+func (k kind) unsure(err error) bool {
+	if k.confirmUncertain {
+		return uncertain(err)
+	}
+	return !taiga.NotSent(err) && unknownOutcome(err)
+}
+
+// confirmPatch decides a PATCH whose outcome is unknown by re-reading the resource: when every
+// field sent shows the value asked for, the write landed (they all differed before it).
+// Otherwise <kind>_update_unconfirmed, exit 1: a request still running on the server can land
+// after the check, and a re-run would repeat a merge like --append-description. A resource
+// without OCC passes version, the next version of the read the patch came from: any other
+// version means another write landed next to ours, which a matching re-read cannot rule out.
+// check is the command that shows the resource, for the recovery.
+func (s *Service) confirmPatch(ctx context.Context, k kind, path string, patch Object, version int64, sendErr error, check string) (Object, error) {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
+	defer cancel()
+	now, err := Read(rctx, s.API, path, nil)
+	checked := "the re-read does not show the change, but the request may still be running on the server"
+	if err != nil {
+		checked = "the re-read to check failed: " + output.AsError(err).Error()
+	} else if shows(now, patch) {
+		if version == 0 || ID(now["version"]) == version {
+			return now, nil
+		}
+		checked = fmt.Sprintf("the re-read shows the values sent, but with version %v instead of %d: another write landed next to it and may have been overwritten", now["version"], version)
+	}
+	return nil, &output.Error{Code: k.name + "_update_unconfirmed", Source: taiga.ToOutput(sendErr).Source, Stage: "PATCH " + path,
+		Cause:    fmt.Sprintf("the change may have been applied: PATCH %s failed (%v) and %s", path, sendErr, checked),
+		Recovery: "do not re-run the command blindly: wait, check with " + check + " and repeat only what is still missing",
+		Exit:     output.ExitUnexpected}
+}
+
+// shows reports whether o holds every field of patch with the value sent (tags by name).
+func shows(o, patch Object) bool { return len(differences(o, patch)) == 0 }
+
+// differences lists, sorted, the fields of patch that o does not hold with the value sent.
+// Tags compare by name, as Taiga stores them (the CLI already sends them in lower case).
+func differences(o, patch Object) []string {
+	out := []string{}
+	for key, want := range patch {
+		got := o[key]
+		if key == "tags" {
+			names, err := Names(got)
+			if err != nil {
+				out = append(out, key)
+				continue
+			}
+			got = names
+		}
+		if _, ok := o[key]; !ok || !equal(got, want) {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// applied gives write_applied the recovery of the kind: the generic one names stories.
+func (k kind) applied(err error, check string) error {
+	var e *output.Error
+	if k == storyKind || !errors.As(err, &e) || e.Code != "write_applied" {
+		return err
+	}
+	out := *e
+	out.Recovery = "do not re-run the command: the change is already saved; check it with " + check
+	return &out
 }
 
 // opaqueKeys are fields whose answer does not show everything a write replaces: Taiga answers

@@ -515,7 +515,7 @@ git commit -m "Validar o contrato de tasks no Taiga local"
 
 - [ ] **Step 1: testes primeiro.**
   - Resolução: `task get REF` por `tasks/by_ref`; `--id` conferido contra o projeto; `--story REF` resolvido por `Service.Story`.
-  - `create` exige `--story` (paridade com o MCP; task solta fica para `taiga api`). Sem `version` no POST. Resposta ilegível → `write_applied` (não há como reler sem o id). Sem resposta conclusiva (rede depois de aberta a conexão, timeout ou 5xx), procura por `subject` + `user_story` + `owner` = `users/me` criada depois da leitura inicial; achou uma → sucesso; nenhuma ou várias → `task_create_unconfirmed` (exit 1; "check `taiga task list --story REF` before creating again").
+  - `create` exige `--story` (paridade com o MCP; task solta fica para `taiga api`). Sem `version` no POST. Resposta ilegível → `write_applied` (não há como reler sem o id). Sem resposta conclusiva (rede depois de aberta a conexão, timeout ou 5xx), procura por `subject` + `user_story` + `owner` = `users/me` criada depois da leitura inicial; achou uma → sucesso; nenhuma ou várias → `task_create_unconfirmed` (exit 1; "check `taiga task list --story REF` before creating again"). **Substituído em 2026-10-03 (opção B, ver "Decisões tomadas"):** resposta inconclusiva → sempre `task_create_unconfirmed`, com as candidatas para inspeção; nunca sucesso.
   - `update`: tags com `MergeNames` (minúsculas), `--append-description`, status por nome, `--assignee` exige membro, `--clear-assignee`, `--block` exige nota e envia o par `is_blocked`+`blocked_note`, `--unblock` envia o par, `--due-date` valida `AAAA-MM-DD`, `--clear-due-date` envia `null`. Toda flag envia o campo de que depende (OCC por campo).
   - Se a Task 11 mostrar que `assigned_to` **não** é protegido pelo OCC na task: aplicar a releitura antes e a pós-condição da #247 (`assignees_postcondition_failed`); se for protegido, só a repetição única de `WriteVersionedFrom`. Escrever os dois testes e manter o que corresponder ao achado.
   - `close` como `story close`: um status fechado; vários sem `--status` → `ambiguous_name`; nunca acrescenta tag.
@@ -588,6 +588,7 @@ Não detalhado aqui; plano próprio depois da fase 3. Escopo decidido (2026-10-0
 | 2026-10-01 | **Diagnóstico:** check `project` no `auth status --diagnose`, sem comando novo | Cedric, nesta conversa |
 | 2026-10-01 | **PRs:** ordem #252 → #251 → #253; a #253 em três PRs (`TG-253-leitura`, `TG-253-epicos`, `TG-253-tasks`) | Cedric, nesta conversa |
 | 2026-10-01 | **Tasks:** paridade do MCP + `task field` + bloqueio + comentários + due date; sem milestone | Cedric, nesta conversa |
+| 2026-10-03 | **`task create` incerto: opção B.** Resposta inconclusiva do `POST tasks` (rede, 5xx, 3xx) → sempre `task_create_unconfirmed` (exit 1), com ref/id das candidatas (mesmo subject, story e owner, novas desde a lista inicial) ou "nenhuma encontrada"; nunca sucesso. Três revisões mostraram que nenhuma comparação de estado prova a identidade (valores customizados, watchers, `is_iocaine` com `version` 1) | Cedric, via Assistente Global (rodada 3 do PR #15) |
 | 2026-10-01 | **Fase 4:** skill + migração; o TOML de exemplo vira canônico após conferência com o script atual, aprovada pelo Cedric na própria #254 | Cedric, nesta conversa |
 
 ### Propostas do plano (aprovadas pelo Cedric na revisão do plano, 2026-10-01)

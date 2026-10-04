@@ -62,6 +62,32 @@ taiga story comments 246 --output text
 - Swimlanes: `taiga swimlane list` mostra as swimlanes do projeto na ordem do board, com `is_default` na padrão. `--swimlane` (nome ou id) move a story; `--clear-swimlane` tira a story de qualquer swimlane; `story list --swimlane A` e `story list --no-swimlane` filtram por elas. Story criada sem `--swimlane` fica sem swimlane, mesmo com uma padrão no projeto. Criar, renomear e reordenar swimlanes continua na interface web: exige admin, a primeira swimlane do projeto puxa todas as stories e a ordem não tem `version`.
 - Épico: `--epic REF` no `create` e no `update` **acrescenta** o vínculo (a story pode ter vários épicos); `--replace-epic REF --confirm-delete` no `update` **troca**: deixa só esse épico. Detalhes na seção "Vincular stories a épicos".
 
+## Tasks
+
+Uma task pertence a uma story e é tratada pela ref, como a story (stories e tasks usam a mesma sequência de refs no projeto):
+
+```sh
+taiga task list --story 246 --closed=false
+taiga task get 250
+taiga task create --story 246 --subject "Escrever os testes" --assignee me --due-date 2026-10-31
+taiga task update 250 --status "In progress" --add-tag cli --append-description "Falta o caso de rede."
+taiga task update 250 --block "aguardando revisão da B6"
+taiga task update 250 --unblock --clear-assignee --clear-due-date
+taiga task close 250
+taiga task field set 250 "Horas=8h"
+taiga task comment 250 --body "Entregue em staging."
+taiga task comments 250 --output text
+```
+
+- `task create` exige `--story`: task sem story só por `taiga api`. Não há `--milestone`: a task fica na sprint da story.
+- Status vêm dos status de task do projeto (`taiga status list --kind task`).
+- A task tem **um** responsável (`assigned_to`): `--assignee` (username exato, id ou `me`, sempre membro do projeto) define e `--clear-assignee` remove. Ao contrário da story, o controle de concorrência do Taiga cobre esse campo na task: uma troca concorrente dá `version_conflict` (exit 4).
+- Bloqueio e prazo: `--block "nota"` (nota obrigatória) e `--unblock`; `--due-date AAAA-MM-DD` e `--clear-due-date`.
+- **`close` só muda o status.** Sem `--status`, usa o único status fechado do projeto (o template padrão de task tem só `Closed`). **Diferença em relação ao MCP:** o `taiga_tasks_archive_or_close` acrescenta a tag `archived-by-mcp`; a CLI não acrescenta tag nenhuma.
+- `task field list/set` e `task comment/comments` funcionam como os de story, com os valores e o histórico da task.
+- Toda escrita aceita `--dry-run`; o `update`, o `close` e o `field set` aceitam `--force-version`.
+- Resposta perdida depois do envio (rede, 5xx ou redirect) nunca sai com exit 7. O `create` sai **sempre** com `task_create_unconfirmed` (exit 1), mesmo que a task tenha sido gravada: nada prova que a task encontrada veio deste comando, porque outro processo com a mesma conta pode ter criado a mesma. A `cause` lista ref e id das candidatas (tasks novas na story, desta conta, com o mesmo subject) ou diz que nenhuma foi encontrada; lista vazia ou ilegível também não prova que a task não existe, porque o pedido pode gravar depois. O `update`, o `close` e o `field set` releem a task: a alteração está lá, sucesso; senão `task_update_unconfirmed` (exit 1). Nos dois casos, **não** repita o comando às cegas: confira com `taiga task list --story REF` ou `taiga task get REF`, porque repetir pode criar outra task ou acrescentar a descrição duas vezes.
+
 ## Projetos, membros, milestones e épicos
 
 Comandos só de leitura:

@@ -320,14 +320,14 @@ func escapeJSON(s string) string {
 	return b.String()
 }
 
-// renderStoryFields prints the values of a story next to their definitions. version is the
-// version of the values resource, not the story's.
-func (a *App) renderStoryFields(ctx context.Context, service *app.Service, story, values app.Object) error {
-	defs, err := service.Fields(ctx, "story")
+// renderFields prints the values of a story or task (kind) next to their definitions. version
+// is the version of the values resource, not the story's or task's.
+func (a *App) renderFields(ctx context.Context, service *app.Service, kind string, story, values app.Object) error {
+	defs, err := service.Fields(ctx, kind)
 	if err != nil {
 		return err
 	}
-	view, err := service.StoryView(story)
+	view, err := service.View(kind, story)
 	if err != nil {
 		return err
 	}

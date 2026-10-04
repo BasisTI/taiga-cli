@@ -26,7 +26,9 @@ func (s *Service) Story(ctx context.Context, ref string, id int64) (Object, erro
 }
 
 // StoryView is the output form: tag names instead of pairs, plus the web URL.
-func (s *Service) StoryView(o Object) (Object, error) {
+func (s *Service) StoryView(o Object) (Object, error) { return s.view(storyKind, o) }
+
+func (s *Service) view(k kind, o Object) (Object, error) {
 	out := Object{}
 	for k, v := range o {
 		out[k] = v
@@ -36,7 +38,7 @@ func (s *Service) StoryView(o Object) (Object, error) {
 		return nil, err
 	}
 	out["tags"] = names
-	out["url"] = s.API.BaseURL() + "/project/" + url.PathEscape(fmt.Sprint(s.Project["slug"])) + "/us/" + fmt.Sprint(o["ref"])
+	out["url"] = s.API.BaseURL() + "/project/" + url.PathEscape(fmt.Sprint(s.Project["slug"])) + "/" + k.web + "/" + fmt.Sprint(o["ref"])
 	return out, nil
 }
 
@@ -98,13 +100,19 @@ var remoteFilters = map[string]string{"status": "status", "assignee": "assigned_
 // search, assignee, epic, swimlane, tag; ids already resolved, swimlane "null" for none). Proven filters go to Taiga to shorten
 // the list; every filter is then checked locally, so an ignored parameter never widens it.
 func (s *Service) Stories(ctx context.Context, filters url.Values) ([]Object, error) {
+	return s.items(ctx, storyKind, remoteFilters, filters)
+}
+
+// items lists the stories or tasks of the project matching filters: the proven ones (remote)
+// go to Taiga, and every one is checked locally.
+func (s *Service) items(ctx context.Context, k kind, remote map[string]string, filters url.Values) ([]Object, error) {
 	q := url.Values{"project": {s.projectID()}}
-	for key, param := range remoteFilters {
+	for key, param := range remote {
 		if v, ok := filters[key]; ok {
 			q.Set(param, v[0])
 		}
 	}
-	raws, err := s.API.GetAll(ctx, "userstories", q)
+	raws, err := s.API.GetAll(ctx, k.base, q)
 	if err != nil {
 		return nil, taiga.ToOutput(err)
 	}
@@ -120,7 +128,7 @@ func (s *Service) Stories(ctx context.Context, filters url.Values) ([]Object, er
 		if _, ok := o["swimlane"]; !ok && filters.Has("swimlane") {
 			return nil, fmt.Errorf("list returned a story without the swimlane field")
 		}
-		view, err := s.StoryView(o)
+		view, err := s.view(k, o)
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +152,11 @@ func matches(o Object, filters url.Values) bool {
 	if v := filters.Get("search"); v != "" && !strings.Contains(strings.ToLower(fmt.Sprint(o["subject"])), strings.ToLower(v)) {
 		return false
 	}
-	if v := filters.Get("assignee"); v != "" && !contains(o["assigned_users"], func(x any) bool { return fmt.Sprint(x) == v }) {
+	// A task has only assigned_to; a story shows assigned_to among its assigned_users too.
+	if v := filters.Get("assignee"); v != "" && fmt.Sprint(o["assigned_to"]) != v && !contains(o["assigned_users"], func(x any) bool { return fmt.Sprint(x) == v }) {
+		return false
+	}
+	if v := filters.Get("story"); v != "" && fmt.Sprint(o["user_story"]) != v {
 		return false
 	}
 	if v := filters.Get("epic"); v != "" && !contains(o["epics"], func(x any) bool {
@@ -221,24 +233,24 @@ func (s *Service) UpdateStory(ctx context.Context, ref string, p Patch, dry, for
 	if err != nil {
 		return nil, err
 	}
-	return s.updateFrom(ctx, before, p, dry, force)
+	return s.updateFrom(ctx, storyKind, before, p, dry, force)
 }
 
-func (s *Service) updateFrom(ctx context.Context, before Object, p Patch, dry, force bool) (any, error) {
+func (s *Service) updateFrom(ctx context.Context, k kind, before Object, p Patch, dry, force bool) (any, error) {
 	patch, err := BuildPatch(before, p)
 	if err != nil {
 		return nil, err
 	}
-	path := fmt.Sprintf("userstories/%d", ID(before["id"]))
-	if opaque(patch) && !dry {
+	path := fmt.Sprintf("%s/%d", k.base, ID(before["id"]))
+	if k.fenceAssignees && opaque(patch) && !dry {
 		return s.writeAssignees(ctx, path, before, p, patch, force)
 	}
-	result, err := s.Write(ctx, path, before, patch, dry, force)
+	result, err := s.Write(ctx, k, path, before, patch, dry, force)
 	if err != nil {
 		return nil, err
 	}
 	if o, ok := result.(Object); ok {
-		return s.StoryView(o)
+		return s.view(k, o)
 	}
 	return result, nil
 }
@@ -246,7 +258,12 @@ func (s *Service) updateFrom(ctx context.Context, before Object, p Patch, dry, f
 // CloseStory moves the story to a closed status: the given one, or the project's only closed
 // status. A story already closed is left alone unless another closed status is named.
 func (s *Service) CloseStory(ctx context.Context, ref, selector string, dry, force bool) (any, error) {
-	statuses, err := s.Catalog(ctx, "userstory-statuses")
+	return s.close(ctx, storyKind, ref, selector, dry, force)
+}
+
+// close only changes the status: it never tags, archives or deletes.
+func (s *Service) close(ctx context.Context, k kind, ref, selector string, dry, force bool) (any, error) {
+	statuses, err := s.Catalog(ctx, k.statuses)
 	if err != nil {
 		return nil, err
 	}
@@ -260,13 +277,13 @@ func (s *Service) CloseStory(ctx context.Context, ref, selector string, dry, for
 			return nil, Usage("close requires a closed status: " + selector)
 		}
 	}
-	before, err := s.Story(ctx, ref, 0)
+	before, err := s.byRef(ctx, k.base, k.name, ref, 0)
 	if err != nil {
 		return nil, err
 	}
 	if chosen == nil {
 		if before["is_closed"] == true {
-			return s.StoryView(before)
+			return s.view(k, before)
 		}
 		closed := []Object{}
 		for _, st := range statuses {
@@ -282,7 +299,7 @@ func (s *Service) CloseStory(ctx context.Context, ref, selector string, dry, for
 		}
 		chosen = closed[0]
 	}
-	return s.updateFrom(ctx, before, Patch{Set: Object{"status": chosen["id"]}}, dry, force)
+	return s.updateFrom(ctx, k, before, Patch{Set: Object{"status": chosen["id"]}}, dry, force)
 }
 
 // writeAssignees writes a patch that changes the assignees. Taiga's OCC never sees assigned_to
@@ -303,9 +320,9 @@ func (s *Service) writeAssignees(ctx context.Context, path string, before Object
 		}
 		base = current
 	}
-	resp, err := s.send(ctx, path, before, patch, force)
+	resp, err := s.send(ctx, storyKind, path, before, patch, force)
 	if err != nil {
-		return nil, err
+		return nil, taiga.ToOutput(err)
 	}
 	after, err := reread(ctx, s.API, "PATCH", path, path, resp)
 	if err != nil {
