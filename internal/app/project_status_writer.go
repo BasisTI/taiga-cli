@@ -135,13 +135,29 @@ func (w *statusHTTPWriter) CreateStatus(ctx context.Context, desired Object) err
 	const path = "userstory-statuses"
 	r, err := w.service.API.Do(ctx, taiga.Request{Method: "POST", Path: path, Body: body})
 	if err != nil {
-		// 400 on "name": another run created it first (Taiga refuses the same name). A lost
-		// answer: the status may exist. Both are settled by reading, never by a second POST.
+		// 400 on "name": refused, another run created it first (Taiga refuses the same name), so
+		// a failed read is just that read's error. A 2xx with its body lost: the status is
+		// saved, so a failed read must keep that (write_applied), never a repeatable error. Both
+		// are settled by reading, never by a second POST.
 		var ae *taiga.APIError
 		var ue *taiga.UnreadableBodyError
-		if (errors.As(err, &ae) && ae.Status == 400 && hasKey(ae.Body, "name")) || errors.As(err, &ue) {
+		if errors.As(err, &ae) && ae.Status == 400 && hasKey(ae.Body, "name") {
 			if existing, _, rerr := w.existingStatus(ctx, desired); existing != nil || rerr != nil {
 				return rerr
+			}
+		}
+		if errors.As(err, &ue) {
+			existing, _, rerr := w.existingStatus(ctx, desired)
+			var oe *output.Error
+			switch {
+			case existing != nil:
+				return nil
+			case errors.As(rerr, &oe) && oe.Code == "project_changed":
+				return rerr // found, with other values: exit 4, never a repeatable one
+			case rerr != nil:
+				applied := *output.AsError(WriteApplied("POST", path, ue.Status, rerr))
+				applied.Recovery = "do not assume it is missing: the status is saved; run `taiga project plan` to see what is left before applying again"
+				return &applied
 			}
 		}
 		if uncertain(err) {

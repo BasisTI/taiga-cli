@@ -242,3 +242,48 @@ func TestIntegrationCuratedWritesRedirectIsUncertain(t *testing.T) {
 		t.Errorf("tasks of the story: %q", got)
 	}
 }
+
+// The first action of an apply: Taiga creates the status (201), the proxy cuts the body, and the
+// catalog read that would settle it fails with a redirect, a 5xx or a dropped connection. The
+// status is saved, so the error is write_applied (exit 1), never a repeatable exit 7; a run
+// without the proxy converges without a second status (review round 1, Codex).
+func TestIntegrationApplyLostStatusBodyWithFailedRecovery(t *testing.T) {
+	for _, fail := range []string{"302", "503", "drop"} {
+		env, _, _ := freshProject(t, fmt.Sprintf("cli-test-lost-status-%s-%d", fail, time.Now().UnixNano()))
+		posted := false
+		url := proxy(t, func(w http.ResponseWriter, r *http.Request, body []byte) bool {
+			switch {
+			case r.Method == "POST" && r.URL.Path == "/api/v1/userstory-statuses" && !posted:
+				posted = true
+				if got := forward(t, r, body); got.status != 201 {
+					t.Errorf("forward: %d %s", got.status, got.body)
+				}
+				cut(w, 201)
+				return true
+			case r.Method == "GET" && r.URL.Path == "/api/v1/userstory-statuses" && posted:
+				switch fail {
+				case "302":
+					w.Header().Set("Location", "https://elsewhere.example/")
+					w.WriteHeader(302)
+				case "503":
+					w.WriteHeader(503)
+				default:
+					conn, _, _ := w.(http.Hijacker).Hijack()
+					_ = conn.Close()
+				}
+				return true
+			}
+			return false
+		})
+		proxied := map[string]string{"TAIGA_URL": url, "TAIGA_TOKEN": env["TAIGA_TOKEN"], "TAIGA_PROJECT": env["TAIGA_PROJECT"]}
+		toml := "[[story_status]]\nname = \"ReviewStatus\"\ncolor = \"#000000\"\n"
+		_, errOut, code := runIn(t, proxied, toml, "project", "apply", "-f", "-")
+		if code != 1 || !strings.Contains(errOut, "write_applied") || !strings.Contains(errOut, "HTTP 201") || !strings.Contains(errOut, "taiga project plan") {
+			t.Errorf("%s: exit %d %s", fail, code, errOut)
+		}
+		out, errOut, code := runIn(t, env, toml, "project", "apply", "-f", "-")
+		if code != 0 || applyResult(t, out)["complete"] != true || strings.Count(statusNames(t, env), "ReviewStatus/") != 1 {
+			t.Errorf("%s: re-run %d %s %s", fail, code, errOut, statusNames(t, env))
+		}
+	}
+}

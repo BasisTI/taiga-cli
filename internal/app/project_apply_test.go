@@ -568,3 +568,39 @@ func TestApplyProjectReadFailureAfterAppliedWriteIsNotExit7(t *testing.T) {
 		t.Fatalf("applied %d: %v %q", len(got.Applied), err, e.Recovery)
 	}
 }
+
+// postThenFailReads fails every catalog read with readErr once a POST was sent.
+type postThenFailReads struct {
+	*statusAPI
+	readErr error
+}
+
+func (q postThenFailReads) Do(ctx context.Context, r taiga.Request) (*taiga.Response, error) {
+	resp, err := q.statusAPI.Do(ctx, r)
+	if r.Method == "POST" {
+		q.listErr = q.readErr
+	}
+	return resp, err
+}
+
+// The first action of the plan: Taiga answered 201 but the body was lost, and the read that
+// would settle it fails (3xx, 5xx, network). The status is saved: write_applied, exit 1, never
+// the repeatable exit 7 of the read (review round 1, Codex).
+func TestApplyFirstStatusLostBodyWithFailedRecoveryIsWriteApplied(t *testing.T) {
+	for _, readErr := range []error{
+		&taiga.APIError{Status: 302, Method: "GET", Path: "userstory-statuses"},
+		&taiga.APIError{Status: 503, Method: "GET", Path: "userstory-statuses"},
+		&taiga.NetworkError{Method: "GET", Path: "userstory-statuses", Err: errors.New("connection reset")},
+	} {
+		a := &statusAPI{fields: remoteFields(), created: true,
+			postErr: &taiga.UnreadableBodyError{Method: "POST", Path: "userstory-statuses", Status: 201, Err: errors.New("unexpected EOF")}}
+		statusWriter(a)
+		s := &Service{API: postThenFailReads{a, readErr}, Project: Object{"id": 37, "slug": "infra"}, catalogs: map[string][]Object{}}
+		spec := ProjectSpec{StoryStatus: []StatusSpec{{Name: "ReviewStatus", Color: "#000000"}}}
+		got, err := s.ApplyProject(context.Background(), spec, false)
+		e := output.AsError(err)
+		if e.Code != "write_applied" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Cause, "HTTP 201") || !strings.Contains(e.Recovery, "taiga project plan") || len(a.posts) != 1 || len(got.Applied) != 0 {
+			t.Errorf("%v: applied %d posts %d: %v", readErr, len(got.Applied), len(a.posts), err)
+		}
+	}
+}
