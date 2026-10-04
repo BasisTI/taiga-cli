@@ -56,32 +56,36 @@ func generatedScript(t *testing.T, shell string, desc bool) string {
 	return out
 }
 
-var (
-	debugCall = regexp.MustCompile(`^\s*__taiga_debug( .*)?$`)
-	noopLine  = regexp.MustCompile(`^\s*(:|true)?$`)
-)
+var debugCall = regexp.MustCompile(`^(\s*)__taiga_debug( .*)?$`)
 
-// withoutDebug drops the shell's debug writer, its calls and the lines a no-op or blank, so
-// two scripts compare on everything else.
-func withoutDebug(script string) []string {
+// testNoop is what each call to the debug writer must become: a no-op where a block could end
+// up empty, nothing in PowerShell.
+var testNoop = map[string]string{"bash": ":", "zsh": ":", "fish": "true", "powershell": ""}
+
+// withoutDebug is Cobra's script without the debug writer, each call turned into the no-op.
+func withoutDebug(shell, script string) string {
 	out := []string{}
 	writer := false
 	for _, line := range strings.Split(script, "\n") {
+		m := debugCall.FindStringSubmatch(line)
 		switch {
 		case line == "__taiga_debug()" || strings.HasPrefix(line, "function __taiga_debug"):
 			writer = true
 		case writer:
 			writer = line != "}" && line != "end"
-		case debugCall.MatchString(line), noopLine.MatchString(line):
+		case m != nil:
+			if testNoop[shell] != "" {
+				out = append(out, m[1]+testNoop[shell])
+			}
 		default:
 			out = append(out, line)
 		}
 	}
-	return out
+	return strings.Join(out, "\n")
 }
 
 // The scripts carry no debug log of their own: no writer, no call, no BASH_COMP_DEBUG_FILE.
-// Everything else is Cobra's script, line for line.
+// Everything else is Cobra's script, line for line, with a no-op where each call was.
 func TestCompletionScriptsHaveNoShellDebug(t *testing.T) {
 	for _, shell := range completionShells {
 		for _, desc := range []bool{true, false} {
@@ -89,11 +93,62 @@ func TestCompletionScriptsHaveNoShellDebug(t *testing.T) {
 			if strings.Contains(got, "__taiga_debug") || strings.Contains(got, "BASH_COMP_DEBUG_FILE") {
 				t.Errorf("%s (descriptions %v) still logs to BASH_COMP_DEBUG_FILE", shell, desc)
 			}
-			want := withoutDebug(cobraScript(t, shell, desc))
-			if g := withoutDebug(got); strings.Join(g, "\n") != strings.Join(want, "\n") {
+			if want := withoutDebug(shell, cobraScript(t, shell, desc)); got != want {
 				t.Errorf("%s (descriptions %v) differs from Cobra's beyond the debug log", shell, desc)
 			}
 		}
+	}
+}
+
+// A call that shares its line with another statement, or a writer left open, fails closed:
+// dropping the line would drop the statement too.
+func TestCompletionScriptFilterFailsClosed(t *testing.T) {
+	for _, script := range []string{
+		"f() {\n    __taiga_debug \"x\"; return 3\n}\n",
+		"f() {\n    __taiga_debug \"x\" && return 3\n}\n",
+		"function f\n    __taiga_debug \"y\"; or return 1\nend\n",
+		"case $a in\n    a) __taiga_debug a ;;\nesac\n",
+		"__taiga_debug()\n{\n    echo \"$*\"\n",
+		"g() { echo $BASH_COMP_DEBUG_FILE; }\n",
+	} {
+		if got, err := withoutShellDebug(script, "__taiga_debug", ":"); err == nil {
+			t.Errorf("%q: no error, got %q", script, got)
+		}
+	}
+	got, err := withoutShellDebug("f() {\n    __taiga_debug \"a \\\"b\\\" ${c}\"\n    __taiga_debug\n}\n", "__taiga_debug", ":")
+	if err != nil || got != "f() {\n    :\n    :\n}\n" {
+		t.Errorf("got %q, %v", got, err)
+	}
+}
+
+// parsers check a script without running it.
+var parsers = map[string][]string{
+	"bash":       {"bash", "-n"},
+	"zsh":        {"zsh", "-n"},
+	"fish":       {"fish", "--no-execute"},
+	"powershell": {"pwsh", "-NoProfile", "-NonInteractive", "-Command", "$e = $null; $null = [System.Management.Automation.Language.Parser]::ParseFile($env:PARSE_FILE, [ref]$null, [ref]$e); if ($e) { $e; exit 1 }"},
+}
+
+// Each generated script parses in its shell; a shell that is not installed is skipped.
+func TestCompletionScriptsParse(t *testing.T) {
+	for _, shell := range completionShells {
+		t.Run(shell, func(t *testing.T) {
+			p := parsers[shell]
+			if _, err := exec.LookPath(p[0]); err != nil {
+				t.Skipf("%s is not installed", p[0])
+			}
+			for _, desc := range []bool{true, false} {
+				path := filepath.Join(t.TempDir(), "script.ps1")
+				if err := os.WriteFile(path, []byte(generatedScript(t, shell, desc)), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				cmd := exec.Command(p[0], append(p[1:], path)...) // pwsh -Command ignores the path and reads PARSE_FILE
+				cmd.Env = append(os.Environ(), "PARSE_FILE="+path)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Errorf("descriptions %v: %v\n%s", desc, err, out)
+				}
+			}
+		})
 	}
 }
 
@@ -196,14 +251,17 @@ func TestCompletionScriptsKeepTokensOutOfTheDebugFile(t *testing.T) {
 				}
 				t.Skipf("%s is not installed", completionHarness[shell].shell)
 			}
+			for _, desc := range []bool{true, false} {
+				script := generatedScript(t, shell, desc)
+				_, debug := complete(t, shell, bin, script, "nope", "token=SWEEPSECRET", "a\u202eb", "x\x01y", "")
+				if strings.Contains(debug, "SWEEPSECRET") || strings.ContainsAny(debug, "\u202e\x01") {
+					t.Errorf("descriptions %v: debug file leaked:\n%q", desc, debug)
+				}
+				if !strings.Contains(debug, "[Debug] [Error] unable to find a command for arguments: [nope token=…") {
+					t.Errorf("descriptions %v: the binary's own log is gone:\n%q", desc, debug)
+				}
+			}
 			script := generatedScript(t, shell, true)
-			_, debug := complete(t, shell, bin, script, "nope", "token=SWEEPSECRET", "a\u202eb", "x\x01y", "")
-			if strings.Contains(debug, "SWEEPSECRET") || strings.ContainsAny(debug, "\u202e\x01") {
-				t.Errorf("debug file leaked:\n%q", debug)
-			}
-			if !strings.Contains(debug, "[Debug] [Error] unable to find a command for arguments: [nope token=…") {
-				t.Errorf("the binary's own log is gone:\n%q", debug)
-			}
 			for _, words := range [][]string{{"st"}, {"story", ""}, {"story", "l"}, {"story", "list", "--outp"}, {"story", "list", "--"}, {"completion", ""}, {"attachment", "upload", "--t"}} {
 				got, _ := complete(t, shell, bin, script, words...)
 				want, _ := complete(t, shell, bin, cobraScript(t, shell, true), words...)

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/BasisTI/taiga-cli/internal/output"
@@ -103,8 +104,12 @@ func completionScript(root *cobra.Command, shell string, desc bool) (string, err
 // status stays 0, as the writer's own when the variable is unset. PowerShell needs none.
 var shellNoop = map[string]string{"bash": ":", "zsh": ":", "fish": "true", "powershell": ""}
 
+// debugArgs is the one double-quoted argument of a call to the debug writer, and nothing after.
+var debugArgs = regexp.MustCompile(`^\s+"(?:[^"\\]|\\.)*"$`)
+
 // withoutShellDebug drops the definition of writer (from its first line to the "}" or "end"
-// that closes it at the margin) and turns each call, always a line of its own, into noop.
+// that closes it at the margin) and turns each call into noop. A call must be a line of its
+// own with at most one quoted argument: anything after it would go with the line.
 // Anything left that names the writer or the variable is an error, never a script.
 func withoutShellDebug(script, writer, noop string) (string, error) {
 	var b strings.Builder
@@ -117,7 +122,10 @@ func withoutShellDebug(script, writer, noop string) (string, error) {
 			inWriter = text != "}" && text != "end"
 		case text == writer+"()" || text == "function "+writer || text == "function "+writer+" {":
 			inWriter = true
-		case trimmed == writer || strings.HasPrefix(trimmed, writer+" "):
+		case trimmed == writer || strings.HasPrefix(trimmed, writer+" ") || strings.HasPrefix(trimmed, writer+"\t"):
+			if trimmed != writer && !debugArgs.MatchString(trimmed[len(writer):]) {
+				return "", fmt.Errorf("the %s completion script calls %s next to another statement: %q", writer, writer, trimmed)
+			}
 			if noop != "" {
 				b.WriteString(text[:len(text)-len(strings.TrimLeft(text, " \t"))] + noop + "\n")
 			}
