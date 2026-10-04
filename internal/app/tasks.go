@@ -106,27 +106,40 @@ func (s *Service) storyTasks(ctx context.Context, story Object) (map[int64]bool,
 	return ids, nil
 }
 
-// findTask decides nothing: it names the candidates of a POST whose outcome is unknown, for
-// inspection. A candidate is a task of story, owned by me, with the subject sent, that was not in
-// known (read right before the POST). Even one with every field asked for is not proof that it
-// came from this POST (another process of the same account may have created it; custom fields,
-// watchers and the like are not comparable), so the result is always task_create_unconfirmed
-// (decision of 2026-10-03, option B). An empty list, or one that cannot be read, proves no
-// absence either: the request may still land.
+// findTask names the candidates of a POST tasks whose outcome is unknown: the tasks of story not
+// in known (read right before the POST), see unconfirmedCreate.
 func (s *Service) findTask(ctx context.Context, story, me, body Object, known map[int64]bool, sendErr error) (Object, error) {
 	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
 	defer cancel()
 	items, err := s.list(check, "tasks", url.Values{"user_story": {fmt.Sprint(story["id"])}})
-	inspect := fmt.Sprintf("`taiga task list --story %v`", story["ref"])
+	mine := []Object{}
+	for _, o := range items {
+		if ID(o["user_story"]) == ID(story["id"]) {
+			mine = append(mine, o)
+		}
+	}
+	return nil, unconfirmedCreate(taskKind, "the story", fmt.Sprintf("`taiga task list --story %v`", story["ref"]), mine, err, known, me, body, sendErr)
+}
+
+// unconfirmedCreate decides nothing: it is <kind>_create_unconfirmed for a POST whose outcome is
+// unknown (network after the connection opened, 5xx, 3xx), naming for inspection the candidates
+// among items (listErr when they could not be read): owned by me, with the subject sent, not in
+// known (read right before the POST). Even one with every field asked for is not proof that it
+// came from this POST (another process of the same account may have created it; custom fields,
+// watchers and the like are not comparable), so it is never a success (decision of 2026-10-03,
+// option B). An empty list, or one that cannot be read, proves no absence either: the request
+// may still land. where names the scope searched; list is the command that shows it.
+func unconfirmedCreate(k kind, where, list string, items []Object, listErr error, known map[int64]bool, me, body Object, sendErr error) error {
+	inspect := list
 	var checked string
-	if err != nil {
-		checked = "the tasks of the story could not be read to look for it: " + output.AsError(err).Error()
+	if listErr != nil {
+		checked = fmt.Sprintf("the %s of %s could not be read to look for it: %s", k.plural(), where, output.AsError(listErr).Error())
 	} else {
 		found, gets := []string{}, []string{}
 		for _, o := range items {
-			if ID(o["user_story"]) == ID(story["id"]) && !known[ID(o["id"])] && o["subject"] == body["subject"] && ID(o["owner"]) > 0 && ID(o["owner"]) == ID(me["id"]) {
+			if !known[ID(o["id"])] && o["subject"] == body["subject"] && ID(o["owner"]) > 0 && ID(o["owner"]) == ID(me["id"]) {
 				found = append(found, fmt.Sprintf("#%v (id %d)", o["ref"], ID(o["id"])))
-				gets = append(gets, fmt.Sprintf("`taiga task get %v`", o["ref"]))
+				gets = append(gets, fmt.Sprintf("`taiga %s get %v`", k.name, o["ref"]))
 			}
 		}
 		if len(gets) > 0 {
@@ -134,15 +147,23 @@ func (s *Service) findTask(ctx context.Context, story, me, body Object, known ma
 		}
 		switch len(found) {
 		case 0:
-			checked = "the story has no new task of this account with this subject yet, but the request may still be running on the server"
+			checked = fmt.Sprintf("%s has no new %s of this account with this subject yet, but the request may still be running on the server", where, k.name)
 		case 1:
-			checked = "the story has one new task of this account with this subject, " + found[0] + ", but nothing proves it is the one this command created"
+			checked = fmt.Sprintf("%s has one new %s of this account with this subject, %s, but nothing proves it is the one this command created", where, k.name, found[0])
 		default:
-			checked = fmt.Sprintf("the story has %d new tasks of this account with this subject: %s; nothing proves which one, if any, this command created", len(found), strings.Join(found, ", "))
+			checked = fmt.Sprintf("%s has %d new %s of this account with this subject: %s; nothing proves which one, if any, this command created", where, len(found), k.plural(), strings.Join(found, ", "))
 		}
 	}
-	return nil, &output.Error{Code: "task_create_unconfirmed", Source: taiga.ToOutput(sendErr).Source, Stage: "POST tasks",
-		Cause:    fmt.Sprintf("the task may have been created: POST tasks failed (%v) and %s", sendErr, checked),
-		Recovery: "do not re-run the command blindly: it would create another task, and a task not found yet may still be saved; inspect with " + inspect,
+	return &output.Error{Code: k.name + "_create_unconfirmed", Source: taiga.ToOutput(sendErr).Source, Stage: "POST " + k.base,
+		Cause:    fmt.Sprintf("the %s may have been created: POST %s failed (%v) and %s", k.name, k.base, sendErr, checked),
+		Recovery: fmt.Sprintf("do not re-run the command blindly: it would create another %s, and a %s not found yet may still be saved; inspect with %s", k.name, k.name, inspect),
 		Exit:     output.ExitUnexpected}
+}
+
+// plural is the name of many stories or tasks, for messages.
+func (k kind) plural() string {
+	if k.name == "story" {
+		return "stories"
+	}
+	return k.name + "s"
 }

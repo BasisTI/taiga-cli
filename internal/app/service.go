@@ -192,7 +192,7 @@ func (s *Service) Write(ctx context.Context, k kind, path string, before, patch 
 		return WritePlan{true, "PATCH", path, body}, nil
 	}
 	resp, err := s.send(ctx, k, path, before, patch, force)
-	if err != nil && k.confirmUncertain && uncertain(err) {
+	if err != nil && uncertain(err) {
 		return s.confirmPatch(ctx, k, path, patch, 0, err, fmt.Sprintf("`taiga %s get %v`", k.name, before["ref"]))
 	}
 	if err != nil {
@@ -221,16 +221,6 @@ func (s *Service) send(ctx context.Context, k kind, path string, before, patch O
 func uncertain(err error) bool {
 	var ae *taiga.APIError
 	return !taiga.NotSent(err) && (unknownOutcome(err) || errors.As(err, &ae) && ae.Status >= 300 && ae.Status < 400)
-}
-
-// unsure is a failed write whose outcome the kind decides by checking: for a task, any uncertain
-// one; for a story, a network error after the connection opened or a 5xx (a 3xx stays an error
-// until US #274).
-func (k kind) unsure(err error) bool {
-	if k.confirmUncertain {
-		return uncertain(err)
-	}
-	return !taiga.NotSent(err) && unknownOutcome(err)
 }
 
 // confirmPatch decides a PATCH whose outcome is unknown by re-reading the resource: when every

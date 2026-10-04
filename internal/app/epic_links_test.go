@@ -54,7 +54,8 @@ func newLinkAPI(t *testing.T, links ...int64) (*linkAPI, *Service) {
 		delete(f.links, epic)
 		return &taiga.Response{Status: 204}, nil
 	}
-	f.lists = map[string]string{"epics": `[{"id":11,"ref":1,"project":37},{"id":12,"ref":2,"project":37},{"id":13,"ref":3,"project":37},{"id":99,"ref":4,"project":38}]`}
+	f.lists = map[string]string{"epics": `[{"id":11,"ref":1,"project":37},{"id":12,"ref":2,"project":37},{"id":13,"ref":3,"project":37},{"id":99,"ref":4,"project":38}]`, "userstories": `[]`}
+	f.objects = map[string]string{"users/me": `{"id":5}`}
 	s := service(t, &f.fakeAPI)
 	s.API = f
 	return f, s

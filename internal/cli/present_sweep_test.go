@@ -116,6 +116,13 @@ func TestEveryCuratedCommandHidesTokens(t *testing.T) {
 		{failing("PATCH tasks/9100", 302), []string{"task", "close", "250"}},
 		{failing("PATCH tasks/9100", 502), []string{"task", "comment", "250", "--body", "x"}},
 		{failing("PATCH tasks/custom-attributes-values/9100", 502), []string{"task", "field", "set", "250", "Horas=y"}},
+		// Redirected writes of US #274: every *_unconfirmed code echoes the send error.
+		{failing("PATCH userstories/6808", 302), []string{"story", "update", "246", "--subject", "s"}},
+		{failing("PATCH userstories/6808", 307), []string{"story", "update", "246", "--add-assignee", "svc"}},
+		{failing("PATCH userstories/6808", 302), []string{"story", "comment", "246", "--body", "x"}},
+		{failing("PATCH userstories/custom-attributes-values/6808", 302), []string{"story", "field", "set", "246", "Notas=y"}},
+		{failing("POST userstories", 302), []string{"story", "create", "--subject", "s " + sweepURL}},
+		{failing("POST userstory-custom-attributes", 308), []string{"field", "create", "--kind", "story", "--name", "n", "--type", "text"}},
 	} {
 		cases = append(cases, struct {
 			env   func() map[string]string

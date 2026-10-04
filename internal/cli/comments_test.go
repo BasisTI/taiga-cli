@@ -257,12 +257,12 @@ func TestStoryCommentServerErrorIsNeverRepeated(t *testing.T) {
 		t.Fatalf("repeated: %+v", writes(calls))
 	}
 
-	// Applied before the 5xx: the new entry is found (the older one with the same text, already
-	// in the fixture, does not count) and the command succeeds without a second PATCH.
+	// Applied before the 5xx: the new entry is named (the older one with the same text, already
+	// in the fixture, is not), never adopted (option B), and the PATCH is not repeated.
 	f, calls = commentFake(t)
 	f.commentStatus, f.commentApplied, f.commentAnswer = 502, true, `<html>bad gateway</html>`
 	out, stderr, code := runIn(t, f.env(), "", "story", "comment", "246", "--body", "primeiro \"aspas\" acentuação\nlinha 2 **md**")
-	if code != 0 || !strings.Contains(out, `"version": 8`) || len(writes(calls)) != 1 {
+	if code != 1 || out != "" || !strings.Contains(stderr, `"comment_unconfirmed"`) || !strings.Contains(stderr, "1 new comment(s) of this account with this text (entry-") || len(writes(calls)) != 1 {
 		t.Fatalf("%d %s %s %+v", code, out, stderr, writes(calls))
 	}
 }

@@ -87,6 +87,9 @@ func (s *Service) CreateField(ctx context.Context, kind, name, typ string, descr
 				return existing, rerr
 			}
 		}
+		if uncertain(err) {
+			return nil, s.fieldUnconfirmed(ctx, kind, name, path, err)
+		}
 		return nil, taiga.ToOutput(err)
 	}
 	created, err := Decode(r.Body)
@@ -97,6 +100,36 @@ func (s *Service) CreateField(ctx context.Context, kind, name, typ string, descr
 		return nil, WriteApplied("POST", path, r.Status, taiga.ToOutput(fmt.Errorf("decode the created field: %w", err)))
 	}
 	return reread(ctx, s.API, "POST", path, fmt.Sprintf("%s/%d", path, ID(created["id"])), r)
+}
+
+// fieldUnconfirmed is field_create_unconfirmed, exit 1, for a POST whose outcome is unknown
+// (network after the connection opened, 5xx, 3xx). A definition with the name found afterwards
+// is named, never adopted: nothing proves this POST created it (decision of 2026-10-03, option
+// B), and none found proves no absence, because the POST may still be running on the server.
+// Taiga refuses a second definition with the same name, so a later run can never duplicate it.
+func (s *Service) fieldUnconfirmed(ctx context.Context, kind, name, path string, sendErr error) error {
+	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
+	defer cancel()
+	delete(s.catalogs, path)
+	fields, err := s.Fields(check, kind)
+	checked := "the project has no field with this name yet, but the request may still be running on the server"
+	if err != nil {
+		checked = "the fields could not be read to look for it: " + output.AsError(err).Error()
+	} else {
+		found := []string{}
+		for _, f := range fields {
+			if f["name"] == name {
+				found = append(found, fmt.Sprintf("id %d, type %v", ID(f["id"]), f["type"]))
+			}
+		}
+		if len(found) > 0 {
+			checked = fmt.Sprintf("the project has a field with this name (%s), but nothing proves this command created it", strings.Join(found, "; "))
+		}
+	}
+	return &output.Error{Code: "field_create_unconfirmed", Source: taiga.ToOutput(sendErr).Source, Stage: "POST " + path,
+		Cause:    fmt.Sprintf("the field %q may have been created: POST %s failed (%v) and %s", name, path, sendErr, checked),
+		Recovery: fmt.Sprintf("do not assume it is missing: wait and check with `taiga field list --kind %s`; Taiga refuses a second field with the same name, so it is never created twice", kind),
+		Exit:     output.ExitUnexpected}
 }
 
 // existingField returns the definition named name, nil when there is none, or an error when

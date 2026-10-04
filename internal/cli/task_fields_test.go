@@ -89,19 +89,21 @@ func TestTaskCommentAndComments(t *testing.T) {
 	}
 }
 
-func TestTaskCommentLostAnswer(t *testing.T) {
-	for _, status := range []int{502, 302} {
-		for _, applied := range []bool{true, false} {
-			f, calls := commentFake(t)
-			f.history[9100] = []map[string]any{}
-			f.commentStatus, f.commentApplied = status, applied
-			_, stderr, code := runIn(t, f.env(), "", "task", "comment", "250", "--body", "feito")
-			want := 0
-			if !applied {
-				want = 1
-			}
-			if code != want || len(writes(calls)) != 1 || !applied && (!strings.Contains(stderr, "comment_unconfirmed") || !strings.Contains(stderr, "taiga task comments 250")) {
-				t.Fatalf("%d applied=%v: %d %s", status, applied, code, stderr)
+// A comment PATCH without a conclusive answer is always comment_unconfirmed (option B), on a story
+// and on a task, applied or not, with a 5xx or a 3xx: never exit 0, never a repeatable exit 7.
+func TestCommentLostAnswerIsAlwaysUnconfirmed(t *testing.T) {
+	for _, item := range []struct{ kind, ref string }{{"story", "247"}, {"task", "250"}} {
+		for _, status := range []int{502, 302} {
+			for _, applied := range []bool{true, false} {
+				f, calls := commentFake(t)
+				f.history[9100] = []map[string]any{}
+				f.commentStatus, f.commentApplied = status, applied
+				out, stderr, code := runIn(t, f.env(), "", item.kind, "comment", item.ref, "--body", "feito")
+				named := strings.Contains(stderr, "1 new comment(s)")
+				if code != 1 || out != "" || len(writes(calls)) != 1 || !strings.Contains(stderr, "comment_unconfirmed") || named != applied ||
+					!strings.Contains(stderr, "taiga "+item.kind+" comments "+item.ref) {
+					t.Fatalf("%s %d applied=%v: %d %s", item.kind, status, applied, code, stderr)
+				}
 			}
 		}
 	}

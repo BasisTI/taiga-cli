@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BasisTI/taiga-cli/internal/output"
 	"github.com/BasisTI/taiga-cli/internal/taiga"
 )
 
@@ -202,6 +203,7 @@ type statusAPI struct {
 	fieldPosts  []taiga.Request
 	postErr     error
 	created     bool // postErr comes after the status was created
+	listErr     error
 }
 
 func (a *statusAPI) Do(_ context.Context, r taiga.Request) (*taiga.Response, error) {
@@ -270,6 +272,9 @@ func (a *statusAPI) Do(_ context.Context, r taiga.Request) (*taiga.Response, err
 }
 
 func (a *statusAPI) GetAll(_ context.Context, path string, _ url.Values) ([]json.RawMessage, error) {
+	if a.listErr != nil {
+		return nil, a.listErr
+	}
 	items := a.fields
 	if path == "userstory-statuses" {
 		items = a.statuses
@@ -351,10 +356,17 @@ func TestStatusWriterCreateStatusNeverRepeatsThePost(t *testing.T) {
 	if err := statusWriter(a).CreateStatus(context.Background(), desired); !strings.Contains(fmt.Sprint(err), "write_applied") || len(a.posts) != 1 {
 		t.Fatalf("unreadable, missing: %v %d", err, len(a.posts))
 	}
-	// A 5xx is not retried.
-	a = &statusAPI{postErr: &taiga.APIError{Status: 502, Method: "POST", Path: "userstory-statuses"}}
-	if err := statusWriter(a).CreateStatus(context.Background(), desired); exitOf(err) != 7 || len(a.posts) != 1 {
-		t.Fatalf("5xx: %v %d", err, len(a.posts))
+	// A 5xx or a 3xx is never retried nor a repeatable exit 7: status_create_unconfirmed, naming
+	// the status found afterwards, never adopting it (option B).
+	for _, status := range []int{502, 302} {
+		for _, applied := range []bool{true, false} {
+			a = &statusAPI{postErr: &taiga.APIError{Status: status, Method: "POST", Path: "userstory-statuses"}, created: applied}
+			err := statusWriter(a).CreateStatus(context.Background(), desired)
+			e := output.AsError(err)
+			if e.Code != "status_create_unconfirmed" || e.Exit != output.ExitUnexpected || strings.Contains(e.Cause, "has a status with this name") != applied || len(a.posts) != 1 {
+				t.Fatalf("%d applied=%v: %v %d", status, applied, err, len(a.posts))
+			}
+		}
 	}
 }
 
@@ -419,10 +431,30 @@ func TestStatusWriterReorderPostcondition(t *testing.T) {
 	if err := loaded(t, a).Reorder(context.Background(), reordered); err != nil {
 		t.Fatalf("lost answer, applied: %v", err)
 	}
-	// A 5xx that did not apply: the order differs, reported without retry.
-	a = &statusAPI{bulkErr: &taiga.APIError{Status: 502, Method: "POST", Path: "userstory-statuses/bulk_update_order"}}
-	if err := loaded(t, a).Reorder(context.Background(), reordered); exitOf(err) != 4 || len(a.bulks) != 1 {
-		t.Fatalf("5xx: %v %d", err, len(a.bulks))
+	// A 5xx or a 3xx: the re-read decides. Applied and matching is a success; not applied, the
+	// order differs, reported without retry; never a repeatable exit 7.
+	for _, status := range []int{502, 302} {
+		a = &statusAPI{bulkErr: &taiga.APIError{Status: status, Method: "POST", Path: "userstory-statuses/bulk_update_order"}}
+		if err := loaded(t, a).Reorder(context.Background(), reordered); exitOf(err) != 4 || len(a.bulks) != 1 {
+			t.Fatalf("%d: %v %d", status, err, len(a.bulks))
+		}
+		a = &statusAPI{bulkErr: &taiga.APIError{Status: status, Method: "POST", Path: "userstory-statuses/bulk_update_order"}, bulkApplies: true}
+		if err := loaded(t, a).Reorder(context.Background(), reordered); err != nil || len(a.bulks) != 1 {
+			t.Fatalf("%d applied: %v %d", status, err, len(a.bulks))
+		}
+	}
+}
+
+// An uncertain bulk whose re-read fails says nothing about the order: status_order_unconfirmed,
+// exit 1, never the repeatable exit 7 of the send error.
+func TestStatusWriterReorderUncertainWithoutReread(t *testing.T) {
+	for _, status := range []int{502, 302} {
+		a := &statusAPI{bulkErr: &taiga.APIError{Status: status, Method: "POST", Path: "userstory-statuses/bulk_update_order"},
+			afterBulk: func(a *statusAPI) { a.listErr = &taiga.APIError{Status: 503, Method: "GET", Path: "userstory-statuses"} }}
+		err := loaded(t, a).Reorder(context.Background(), reordered)
+		if e := output.AsError(err); e.Code != "status_order_unconfirmed" || e.Exit != output.ExitUnexpected || len(a.bulks) != 1 {
+			t.Fatalf("%d: %v", status, err)
+		}
 	}
 }
 

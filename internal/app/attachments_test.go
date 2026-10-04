@@ -223,10 +223,13 @@ func TestUploadUnreadableAnswerAndRereadFails(t *testing.T) {
 	}
 }
 
-func TestUploadLostAnswerFoundInList(t *testing.T) {
+// An uncertain POST (network after the connection opened, 5xx, 3xx) whose file is in the list is
+// still attachment_unconfirmed (option B): the new id is named, never adopted.
+func TestUploadLostAnswerFoundInListIsNamedNotAdopted(t *testing.T) {
 	for _, lost := range []error{
 		&taiga.NetworkError{Method: "POST", Path: "userstories/attachments", Err: &net.OpError{Op: "read", Err: errors.New("reset")}},
 		&taiga.APIError{Status: 504, Method: "POST", Path: "userstories/attachments"},
+		&taiga.APIError{Status: 302, Method: "POST", Path: "userstories/attachments"},
 	} {
 		f, s := newAttachAPI(t)
 		f.upload = func(a *attachAPI, path string, fields map[string]string, name string, content []byte) (*taiga.Response, error) {
@@ -234,9 +237,24 @@ func TestUploadLostAnswerFoundInList(t *testing.T) {
 			return nil, lost
 		}
 		got, err := s.Upload(context.Background(), "story", story(t, s), writeFile(t, "r.txt", "content"), "", false)
-		if err != nil || got.(Object)["id"] != json.Number("101") || f.uploads != 1 {
+		e := output.AsError(err)
+		if got != nil || e.Code != "attachment_unconfirmed" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Cause, "(id 101)") ||
+			strings.Contains(e.Recovery, "upload again only") || f.uploads != 1 {
 			t.Fatalf("%v: %v %v", lost, got, err)
 		}
+	}
+}
+
+// A redirect answers a POST that was sent and is never followed: not applied, it is
+// attachment_unconfirmed, never a repeatable exit 7.
+func TestUploadRedirectNotAppliedIsUnconfirmed(t *testing.T) {
+	f, s := newAttachAPI(t)
+	f.upload = func(*attachAPI, string, map[string]string, string, []byte) (*taiga.Response, error) {
+		return nil, &taiga.APIError{Status: 307, Method: "POST", Path: "userstories/attachments"}
+	}
+	_, err := s.Upload(context.Background(), "story", story(t, s), writeFile(t, "r.txt", "content"), "", false)
+	if e := output.AsError(err); e.Code != "attachment_unconfirmed" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Cause, "does not show it") || f.uploads != 1 {
+		t.Fatalf("%v", err)
 	}
 }
 
@@ -545,9 +563,9 @@ func TestUploadLostAnswerAfterDeadlineIsChecked(t *testing.T) {
 		return nil, &taiga.NetworkError{Method: "POST", Path: path, Err: context.Canceled}
 	}
 	f.ctxCheck = true
-	got, err := s.Upload(ctx, "story", owner, writeFile(t, "r.txt", "content"), "", false)
-	if err != nil || got.(Object)["created"] != true {
-		t.Fatalf("%v %v", got, err)
+	_, err := s.Upload(ctx, "story", owner, writeFile(t, "r.txt", "content"), "", false)
+	if e := output.AsError(err); e.Code != "attachment_unconfirmed" || !strings.Contains(e.Cause, "(id 101)") {
+		t.Fatalf("%v", err)
 	}
 }
 
