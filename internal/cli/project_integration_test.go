@@ -190,7 +190,7 @@ func TestIntegrationProjectApplyStopsAndResumes(t *testing.T) {
 			return false
 		}
 		posts++
-		if posts == 2 { // the second creation fails before reaching Taiga
+		if posts == 2 { // the second creation never reaches Taiga, but a 502 does not say so
 			w.WriteHeader(502)
 			return true
 		}
@@ -199,7 +199,8 @@ func TestIntegrationProjectApplyStopsAndResumes(t *testing.T) {
 	proxied := map[string]string{"TAIGA_URL": url, "TAIGA_TOKEN": env["TAIGA_TOKEN"], "TAIGA_PROJECT": env["TAIGA_PROJECT"]}
 	out, errOut, code := runIn(t, proxied, toml, "project", "apply", "-f", "-")
 	r := applyResult(t, out)
-	if code != 7 || posts != 2 || r["complete"] != false || len(r["applied"].([]any)) != 1 || len(r["remaining"].([]any)) != 2 || !strings.Contains(errOut, "server_error") {
+	if code != 1 || posts != 2 || r["complete"] != false || len(r["applied"].([]any)) != 1 || len(r["remaining"].([]any)) != 2 ||
+		!strings.Contains(errOut, "status_create_unconfirmed") || !strings.Contains(errOut, "no status with this name yet") {
 		t.Fatalf("partial: exit %d, %d POST: %s %s", code, posts, errOut, out)
 	}
 	// A new run re-plans: A is not created twice.

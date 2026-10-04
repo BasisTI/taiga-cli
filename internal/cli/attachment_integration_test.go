@@ -164,12 +164,14 @@ func TestIntegrationUploadLostAnswer(t *testing.T) {
 		return true
 	})
 	proxied := map[string]string{"TAIGA_URL": url, "TAIGA_TOKEN": env["TAIGA_TOKEN"], "TAIGA_PROJECT": env["TAIGA_PROJECT"]}
-	got := storyJSON(t, proxied, "", "attachment", "upload", ref, localFile(t, "lost.txt", []byte("lost")))
-	if got["created"] != true || posts != 1 {
-		t.Fatalf("%v posts=%d", got, posts)
+	// Applied, answer lost: named, never adopted (option B).
+	out, errOut, code := runIn(t, proxied, "", "attachment", "upload", ref, localFile(t, "lost.txt", []byte("lost")))
+	saved := attachmentList(t, env, ref)
+	if code != 1 || out != "" || posts != 1 || len(saved) != 1 || !strings.Contains(errOut, "attachment_unconfirmed") || !strings.Contains(errOut, fmt.Sprintf("(id %v)", saved[0]["id"])) {
+		t.Fatalf("%d %q %s posts=%d", code, out, errOut, posts)
 	}
 	forwardPost = false
-	_, errOut, code := runIn(t, proxied, "", "attachment", "upload", ref, localFile(t, "never.txt", []byte("never")))
+	_, errOut, code = runIn(t, proxied, "", "attachment", "upload", ref, localFile(t, "never.txt", []byte("never")))
 	if code != 1 || !strings.Contains(errOut, "attachment_unconfirmed") || posts != 2 {
 		t.Fatalf("%d %s posts=%d", code, errOut, posts)
 	}
