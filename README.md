@@ -235,6 +235,8 @@ Without a terminal on stdout, `taiga` prints JSON; on a terminal it prints text.
 
 Every curated command (all but `taiga api`, which prints Taiga's answer as is) hides the value of token parameters in everything it prints, on stdout and on stderr (errors and warnings), `--dry-run` plans included, keeping the keys and the rest of the URL (only the printout changes: a real write sends the values as given and as stored): user photos (`photo`, `big_photo` in `owner_extra_info`, `assigned_to_extra_info`, the comment author), project logos and attachment links are signed media URLs that open the file without authentication while the token lasts. `story get` shows `"photo": "https://…/media/user/…/photo.png?token=…"`.
 
+Shell completion (`taiga completion bash|zsh|fish|powershell`) never calls Taiga, so it only completes command and flag names. When it cannot (an unknown command, an unknown flag, a bad flag value), the error it writes to stderr and, with `BASH_COMP_DEBUG_FILE` set, to that file has the typed words with token values hidden and control and bidi characters escaped (`\u202e`); a word redacted whole no longer reads as a flag, so no error is printed for it. The completion script itself also logs the command line to `BASH_COMP_DEBUG_FILE`: that is shell code and logs what was typed as is.
+
 | Exit | Meaning |
 |---|---|
 | 0 | OK |

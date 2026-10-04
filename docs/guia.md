@@ -132,6 +132,8 @@ taiga story update 246 --replace-epic 15 --confirm-delete
 
 Toda saída dos comandos curados (todos menos `taiga api`, que mostra a resposta do Taiga como veio) esconde o valor dos parâmetros de token em tudo o que imprime, na saída e nos erros e avisos (stderr), inclusive nos planos de `--dry-run`, mantendo as chaves e o resto da URL. Só a impressão muda: a escrita de verdade envia os valores como vieram e como estão guardados. As fotos de usuário (`photo` e `big_photo` em `owner_extra_info`, `assigned_to_extra_info` e no autor dos comentários), o logo do projeto e os links de anexo são URLs assinadas de mídia que abrem o arquivo sem autenticação enquanto o token vale. Em `story get`, a foto sai como `"photo": "https://…/media/user/…?token=…"`.
 
+O completion do shell (`taiga completion bash|zsh|fish|powershell`) nunca chama o Taiga: completa só nomes de comandos e flags. Quando não consegue (comando ou flag desconhecido, valor de flag inválido), o erro que escreve no stderr e, com `BASH_COMP_DEBUG_FILE` definida, nesse arquivo traz as palavras digitadas com o valor de token escondido e controles e bidi escapados (`\u202e`); a palavra redigida inteira deixa de ser flag, e então nenhum erro sai. O script de completion também registra a linha de comando no `BASH_COMP_DEBUG_FILE`: isso é código shell e registra o que foi digitado como veio.
+
 ## Anexos
 
 ```sh
