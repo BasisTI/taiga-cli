@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"strings"
-
+	"github.com/BasisTI/taiga-cli/internal/output"
+	"github.com/BasisTI/taiga-cli/internal/taiga"
 	"github.com/spf13/cobra"
 )
 
@@ -31,11 +31,12 @@ func completeRedacted(cmd *cobra.Command) {
 	}
 }
 
-// completionArg is s redacted, with each unsafe rune escaped and no quotes around it.
+// completionArg is s redacted, with each unsafe rune escaped and no quotes around it. Only
+// what Quote quoted loses its quotes: a redacted value can take the unsafe rune with it.
 func completionArg(s string) string {
-	p := presented(s)
-	if p != s && strings.HasPrefix(p, `"`) && strings.ContainsFunc(s, unsafeRune) {
-		return p[1 : len(p)-1]
+	r := taiga.RedactTokens(s)
+	if q := output.Quote(r); q != r {
+		return q[1 : len(q)-1]
 	}
-	return p
+	return r
 }

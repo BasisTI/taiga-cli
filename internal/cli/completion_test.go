@@ -55,6 +55,10 @@ func TestCompletionHidesTokens(t *testing.T) {
 		{[]string{"attachment", "upload", "--task=token=SWEEPSECRET", ""}, "invalid argument"},
 		// Redacted whole, the argument is no flag any more: no error, and nothing printed.
 		{[]string{"story", "list", "--access_token%3DSWEEPSECRET="}, ""},
+		// The control character goes with the token value: nothing is quoted, nothing unquoted.
+		{[]string{"nope", "\"x?token=SWEEP\x01SECRET", ""}, `[nope "x?token=…]`},
+		// A word that starts with a quote stays a word, not a flag: no error, as without redaction.
+		{[]string{"story", "list", "\"--x?token=SWEEP\x01SECRET"}, ""},
 		{[]string{"story", "list", "--a\u202eb="}, `does not support flag 'a\u202eb'`},
 		{[]string{"story", "list", "--a\u202eb=1", ""}, `--a\u202eb`},
 		{[]string{"nope\nforged", ""}, `nope\nforged`},
@@ -65,6 +69,12 @@ func TestCompletionHidesTokens(t *testing.T) {
 				if strings.Contains(text, "SWEEPSECRET") || strings.ContainsAny(text, "\u202e") || strings.Contains(text, "\nforged") {
 					t.Errorf("%s %q: %s leaked: %q", req, c.args, name, text)
 				}
+			}
+			if c.want == "" {
+				if strings.Contains(stderr+debug, "[Error]") {
+					t.Errorf("%s %q: printed an error\nstderr: %q\ndebug: %q", req, c.args, stderr, debug)
+				}
+				continue
 			}
 			if !strings.Contains(stderr, c.want) || !strings.Contains(debug, c.want) {
 				t.Errorf("%s %q: the error is gone (want %q)\nstderr: %q\ndebug: %q", req, c.args, c.want, stderr, debug)
