@@ -85,6 +85,7 @@ func (a *App) root() *cobra.Command {
 	root.AddCommand(a.userCmd())
 	root.AddCommand(a.milestoneCmd())
 	root.AddCommand(a.epicCmd())
+	a.completionCmd(root)
 	return root
 }
 

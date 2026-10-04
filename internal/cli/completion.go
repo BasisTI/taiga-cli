@@ -1,6 +1,10 @@
 package cli
 
 import (
+	"bytes"
+	"fmt"
+	"strings"
+
 	"github.com/BasisTI/taiga-cli/internal/output"
 	"github.com/BasisTI/taiga-cli/internal/taiga"
 	"github.com/spf13/cobra"
@@ -39,4 +43,91 @@ func completionArg(s string) string {
 		return q[1 : len(q)-1]
 	}
 	return r
+}
+
+// completionCmd gives Cobra's `completion bash|zsh|fish|powershell` (its help and flags kept)
+// scripts without the shell's own debug log. That log appends the command line as typed,
+// tokens included, to $BASH_COMP_DEBUG_FILE; the binary's log there stays, redacted by
+// completeRedacted.
+func (a *App) completionCmd(root *cobra.Command) {
+	root.InitDefaultCompletionCmd()
+	for _, c := range root.Commands() {
+		if c.Name() != "completion" {
+			continue
+		}
+		for _, sh := range c.Commands() {
+			shell := sh.Name()
+			sh.RunE = func(cmd *cobra.Command, _ []string) error {
+				noDesc, _ := cmd.Flags().GetBool("no-descriptions")
+				s, err := completionScript(cmd.Root(), shell, !noDesc)
+				if err != nil {
+					return err
+				}
+				return a.writeScript(cmd, s)
+			}
+		}
+	}
+}
+
+// completionScript is Cobra's script for shell without its debug writer and the calls to it.
+func completionScript(root *cobra.Command, shell string, desc bool) (string, error) {
+	var b bytes.Buffer
+	var err error
+	switch shell {
+	case "bash":
+		err = root.GenBashCompletionV2(&b, desc)
+	case "zsh":
+		if desc {
+			err = root.GenZshCompletion(&b)
+		} else {
+			err = root.GenZshCompletionNoDesc(&b)
+		}
+	case "fish":
+		err = root.GenFishCompletion(&b, desc)
+	case "powershell":
+		if desc {
+			err = root.GenPowerShellCompletionWithDesc(&b)
+		} else {
+			err = root.GenPowerShellCompletion(&b)
+		}
+	default:
+		return "", fmt.Errorf("no completion script for %s", shell)
+	}
+	if err != nil {
+		return "", err
+	}
+	return withoutShellDebug(b.String(), "__"+root.Name()+"_debug", shellNoop[shell])
+}
+
+// shellNoop replaces each call to the debug writer, so a block never ends up empty and the
+// status stays 0, as the writer's own when the variable is unset. PowerShell needs none.
+var shellNoop = map[string]string{"bash": ":", "zsh": ":", "fish": "true", "powershell": ""}
+
+// withoutShellDebug drops the definition of writer (from its first line to the "}" or "end"
+// that closes it at the margin) and turns each call, always a line of its own, into noop.
+// Anything left that names the writer or the variable is an error, never a script.
+func withoutShellDebug(script, writer, noop string) (string, error) {
+	var b strings.Builder
+	inWriter := false
+	for _, line := range strings.SplitAfter(script, "\n") {
+		text := strings.TrimRight(line, "\n")
+		trimmed := strings.TrimSpace(text)
+		switch {
+		case inWriter:
+			inWriter = text != "}" && text != "end"
+		case text == writer+"()" || text == "function "+writer || text == "function "+writer+" {":
+			inWriter = true
+		case trimmed == writer || strings.HasPrefix(trimmed, writer+" "):
+			if noop != "" {
+				b.WriteString(text[:len(text)-len(strings.TrimLeft(text, " \t"))] + noop + "\n")
+			}
+		default:
+			b.WriteString(line)
+		}
+	}
+	out := b.String()
+	if inWriter || strings.Contains(out, writer) || strings.Contains(out, "BASH_COMP_DEBUG_FILE") {
+		return "", fmt.Errorf("the %s completion script still logs to BASH_COMP_DEBUG_FILE", writer)
+	}
+	return out, nil
 }
