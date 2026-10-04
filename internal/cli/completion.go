@@ -107,10 +107,12 @@ var shellNoop = map[string]string{"bash": ":", "zsh": ":", "fish": "true", "powe
 // debugArgs is the one double-quoted argument of a call to the debug writer, and nothing after.
 var debugArgs = regexp.MustCompile(`^\s+"(?:[^"\\]|\\.)*"$`)
 
-// withoutShellDebug drops the definition of writer (from its first line to the "}" or "end"
-// that closes it at the margin) and turns each call into noop. A call must be a line of its
-// own with at most one quoted argument: anything after it would go with the line.
-// Anything left that names the writer or the variable is an error, never a script.
+// withoutShellDebug drops the definition of writer, from its first line to the "}" or "end"
+// that closes it at the margin, and turns each call into noop. The body in between is
+// indented: any other line at the margin is refused, so a writer closed otherwise never takes
+// the next function with it. A call must be a line of its own with at most one quoted
+// argument: anything after it would go with the line. Anything left that names the writer or
+// the variable is an error, never a script.
 func withoutShellDebug(script, writer, noop string) (string, error) {
 	var b strings.Builder
 	inWriter := false
@@ -119,6 +121,11 @@ func withoutShellDebug(script, writer, noop string) (string, error) {
 		trimmed := strings.TrimSpace(text)
 		switch {
 		case inWriter:
+			// The body is indented: a line at the margin closes the writer or is not its own.
+			margin := text != "" && text == strings.TrimLeft(text, " \t")
+			if margin && text != "{" && text != "}" && text != "end" {
+				return "", fmt.Errorf("the %s writer of the completion script has no closing line at the margin", writer)
+			}
 			inWriter = text != "}" && text != "end"
 		case text == writer+"()" || text == "function "+writer || text == "function "+writer+" {":
 			inWriter = true

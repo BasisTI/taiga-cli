@@ -115,10 +115,36 @@ func TestCompletionScriptFilterFailsClosed(t *testing.T) {
 			t.Errorf("%q: no error, got %q", script, got)
 		}
 	}
+	// A writer closed with an indent (a change of Cobra's format) is refused, not run on into
+	// the next function.
+	for _, m := range []struct{ shell, from, to string }{
+		{"bash", "\n}\n", "\n    }\n"}, {"zsh", "\n}\n", "\n    }\n"}, {"fish", "\nend\n", "\n    end\n"}, {"powershell", "\n}\n", "\n    }\n"},
+	} {
+		script := strings.Replace(cobraScript(t, m.shell, true), m.from, m.to, 1)
+		if got, err := withoutShellDebug(script, "__taiga_debug", testNoop[m.shell]); err == nil {
+			t.Errorf("%s with the writer closed by %q: no error, got %d bytes", m.shell, m.to, len(got))
+		}
+	}
 	got, err := withoutShellDebug("f() {\n    __taiga_debug \"a \\\"b\\\" ${c}\"\n    __taiga_debug\n}\n", "__taiga_debug", ":")
 	if err != nil || got != "f() {\n    :\n    :\n}\n" {
 		t.Errorf("got %q, %v", got, err)
 	}
+}
+
+// requireShell skips the test when exe is not installed, unless exe is bash or listed in
+// TAIGA_TEST_SHELLS (comma-separated, as the CI sets it): then it fails, so no shell goes
+// untested in silence.
+func requireShell(t *testing.T, exe string) {
+	t.Helper()
+	if _, err := exec.LookPath(exe); err == nil {
+		return
+	}
+	for _, want := range append([]string{"bash"}, strings.Split(os.Getenv("TAIGA_TEST_SHELLS"), ",")...) {
+		if strings.TrimSpace(want) == exe {
+			t.Fatalf("%s is required and not installed", exe)
+		}
+	}
+	t.Skipf("%s is not installed", exe)
 }
 
 // parsers check a script without running it.
@@ -134,9 +160,7 @@ func TestCompletionScriptsParse(t *testing.T) {
 	for _, shell := range completionShells {
 		t.Run(shell, func(t *testing.T) {
 			p := parsers[shell]
-			if _, err := exec.LookPath(p[0]); err != nil {
-				t.Skipf("%s is not installed", p[0])
-			}
+			requireShell(t, p[0])
 			for _, desc := range []bool{true, false} {
 				path := filepath.Join(t.TempDir(), "script.ps1")
 				if err := os.WriteFile(path, []byte(generatedScript(t, shell, desc)), 0o600); err != nil {
@@ -245,12 +269,7 @@ func TestCompletionScriptsKeepTokensOutOfTheDebugFile(t *testing.T) {
 	bin := buildTaiga(t)
 	for _, shell := range completionShells {
 		t.Run(shell, func(t *testing.T) {
-			if _, err := exec.LookPath(completionHarness[shell].shell); err != nil {
-				if shell == "bash" {
-					t.Fatal("bash is required")
-				}
-				t.Skipf("%s is not installed", completionHarness[shell].shell)
-			}
+			requireShell(t, completionHarness[shell].shell)
 			for _, desc := range []bool{true, false} {
 				script := generatedScript(t, shell, desc)
 				_, debug := complete(t, shell, bin, script, "nope", "token=SWEEPSECRET", "a\u202eb", "x\x01y", "")
@@ -261,13 +280,15 @@ func TestCompletionScriptsKeepTokensOutOfTheDebugFile(t *testing.T) {
 					t.Errorf("descriptions %v: the binary's own log is gone:\n%q", desc, debug)
 				}
 			}
-			script := generatedScript(t, shell, true)
-			for _, words := range [][]string{{"st"}, {"story", ""}, {"story", "l"}, {"story", "list", "--outp"}, {"story", "list", "--"}, {"completion", ""}, {"attachment", "upload", "--t"}} {
-				got, _ := complete(t, shell, bin, script, words...)
-				want, _ := complete(t, shell, bin, cobraScript(t, shell, true), words...)
-				t.Logf("%q: %q", words, got)
-				if got != want || got == "" {
-					t.Errorf("%q: candidates %q, Cobra's script gives %q", words, got, want)
+			for _, desc := range []bool{true, false} {
+				script, cobra := generatedScript(t, shell, desc), cobraScript(t, shell, desc)
+				for _, words := range [][]string{{"st"}, {"story", ""}, {"story", "l"}, {"story", "list", "--outp"}, {"story", "list", "--"}, {"completion", ""}, {"attachment", "upload", "--t"}} {
+					got, _ := complete(t, shell, bin, script, words...)
+					want, _ := complete(t, shell, bin, cobra, words...)
+					t.Logf("descriptions %v, %q: %q", desc, words, got)
+					if got != want || got == "" {
+						t.Errorf("descriptions %v, %q: candidates %q, Cobra's script gives %q", desc, words, got, want)
+					}
 				}
 			}
 		})
