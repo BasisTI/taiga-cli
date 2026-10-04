@@ -143,6 +143,6 @@ func (s *Service) findTask(ctx context.Context, story, me, body Object, known ma
 	}
 	return nil, &output.Error{Code: "task_create_unconfirmed", Source: taiga.ToOutput(sendErr).Source, Stage: "POST tasks",
 		Cause:    fmt.Sprintf("the task may have been created: POST tasks failed (%v) and %s", sendErr, checked),
-		Recovery: "do not re-run the command blindly: it would create another task; inspect with " + inspect + " and create the task only if it is still missing",
+		Recovery: "do not re-run the command blindly: it would create another task, and a task not found yet may still be saved; inspect with " + inspect,
 		Exit:     output.ExitUnexpected}
 }

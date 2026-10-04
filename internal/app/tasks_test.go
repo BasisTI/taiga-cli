@@ -334,6 +334,16 @@ func unconfirmed(t *testing.T, label string, f *taskAPI, s *Service, err error, 
 		!strings.Contains(e.Recovery, "taiga task list --story 246") || !strings.Contains(e.Recovery, "do not re-run") {
 		t.Fatalf("%s: %#v writes %d", label, e, len(f.writes()))
 	}
+	// An absent candidate does not prove the request will not land: the recovery never suggests
+	// creating the task again, in any branch.
+	for _, banned := range []string{"create the task", "create it", "still missing", "only if"} {
+		if strings.Contains(e.Recovery, banned) {
+			t.Fatalf("%s: the recovery suggests creating again (%q): %s", label, banned, e.Recovery)
+		}
+	}
+	if !strings.HasSuffix(e.Recovery, "`taiga task list --story 246`") {
+		t.Fatalf("%s: the recovery must end with the inspection commands: %s", label, e.Recovery)
+	}
 	for _, c := range cause {
 		if !strings.Contains(e.Cause+" "+e.Recovery, c) {
 			t.Fatalf("%s: %q not in %#v", label, c, e)
