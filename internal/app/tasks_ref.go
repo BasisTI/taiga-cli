@@ -17,15 +17,11 @@ type kind struct {
 	// story write that changes assignees is fenced (writeAssignees); a task's assigned_to is in
 	// its history diff and the per-field OCC protects it.
 	fenceAssignees bool
-	// confirmUncertain: a PATCH whose outcome is unknown (network after the connection opened,
-	// 5xx or 3xx) is decided by a re-read, never a repeatable exit 7. Stories keep the phase 2
-	// behaviour until US #274.
-	confirmUncertain bool
 }
 
 var (
 	storyKind = kind{name: "story", base: "userstories", web: "us", statuses: "userstory-statuses", history: "userstory", fenceAssignees: true}
-	taskKind  = kind{name: "task", base: "tasks", web: "task", statuses: "task-statuses", history: "task", confirmUncertain: true}
+	taskKind  = kind{name: "task", base: "tasks", web: "task", statuses: "task-statuses", history: "task"}
 )
 
 func kindOf(name string) (kind, error) {

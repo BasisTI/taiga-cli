@@ -203,7 +203,7 @@ func (s *Service) Upload(ctx context.Context, kind string, owner Object, path, d
 		return created(answer, true), nil
 	case errors.As(err, &ue):
 		return s.findUpload(ctx, endpoint, owner, file, known, ue)
-	case taiga.NotSent(err) || !unknownOutcome(err):
+	case !uncertain(err):
 		return nil, taiga.ToOutput(err)
 	}
 	return s.findUpload(ctx, endpoint, owner, file, known, err)
@@ -255,36 +255,50 @@ func created(o Object, isNew bool) Object {
 }
 
 // findUpload looks for the attachment of a POST without a conclusive answer: a new id with the
-// name and sha1 sent. A 2xx whose body was lost is applied, so not finding it is write_applied;
-// an unknown outcome stays unknown (attachment_unconfirmed, exit 1), because the POST may still
-// be running on the server.
+// name and sha1 sent. A 2xx whose body was lost is applied, so the new one is the answer and not
+// finding it is write_applied. An unknown outcome (network after the connection opened, 5xx,
+// 3xx) is always attachment_unconfirmed, exit 1, naming the new ones: another process of the
+// same account may have attached the same file, so none of them is proof (decision of
+// 2026-10-03, option B), and none found proves no absence, because the POST may still be
+// running on the server.
 func (s *Service) findUpload(ctx context.Context, endpoint string, owner Object, file UploadFile, known map[string]bool, sendErr error) (any, error) {
 	// The upload may have failed because its context is done (--timeout, interrupt): the check
 	// gets a short deadline of its own, or it could never confirm a stored file.
 	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
 	defer cancel()
 	after, err := s.attachments(check, endpoint, owner)
+	found := []Object{}
 	if err == nil {
 		for _, o := range after {
 			if !known[fmt.Sprint(o["id"])] && sameFile(o, file) {
-				return created(o, true), nil
+				found = append(found, o)
 			}
 		}
 	}
 	var ue *taiga.UnreadableBodyError
 	if errors.As(sendErr, &ue) {
+		if len(found) > 0 {
+			return created(found[0], true), nil
+		}
 		if err == nil {
 			err = fmt.Errorf("the new attachment is not in the list of %v", owner["id"])
 		}
 		return nil, WriteApplied("POST", endpoint, ue.Status, err)
 	}
 	checked := "the list does not show it yet, but the request may still be running on the server"
-	if err != nil {
+	switch {
+	case err != nil:
 		checked = "the list could not be read to check: " + output.AsError(err).Error()
+	case len(found) > 0:
+		ids := []string{}
+		for _, o := range found {
+			ids = append(ids, fmt.Sprint(o["id"]))
+		}
+		checked = fmt.Sprintf("the list shows %d new attachment(s) with this name and sha1 (id %s), but nothing proves this command attached them", len(found), strings.Join(ids, ", "))
 	}
 	return nil, &output.Error{Code: "attachment_unconfirmed", Source: output.AsError(taiga.ToOutput(sendErr)).Source, Stage: "POST " + endpoint,
 		Cause:    fmt.Sprintf("the file may have been attached: POST %s failed (%v) and %s", endpoint, sendErr, checked),
-		Recovery: fmt.Sprintf("do not upload again blindly: wait, check with `taiga attachment list %v` and upload again only if the file is still missing", owner["ref"]),
+		Recovery: fmt.Sprintf("do not upload again blindly: it would attach the file twice, and an attachment not found yet may still be saved; check with `taiga attachment list %v`", owner["ref"]),
 		Exit:     output.ExitUnexpected}
 }
 

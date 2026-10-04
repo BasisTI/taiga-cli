@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -197,7 +199,10 @@ func contains(list any, match func(any) bool) bool {
 	return false
 }
 
-// CreateStory posts body to the project. There is no previous version: none is sent.
+// CreateStory posts body to the project, once and without version. When the answer says nothing
+// conclusive (network after the connection opened, 5xx, 3xx), the result is always
+// story_create_unconfirmed, naming the candidates found in the project (unconfirmedCreate). A
+// re-run is never offered: it would create a second story.
 func (s *Service) CreateStory(ctx context.Context, body Object, dry bool) (any, error) {
 	subject, _ := body["subject"].(string)
 	if strings.TrimSpace(subject) == "" {
@@ -207,7 +212,22 @@ func (s *Service) CreateStory(ctx context.Context, body Object, dry bool) (any, 
 	if dry {
 		return WritePlan{true, "POST", "userstories", body}, nil
 	}
+	me, err := Read(ctx, s.API, "users/me", nil)
+	if err != nil {
+		return nil, err
+	}
+	known, err := s.ownStories(ctx, me)
+	if err != nil {
+		return nil, err
+	}
 	r, err := s.API.Do(ctx, taiga.Request{Method: "POST", Path: "userstories", Body: body})
+	var ue *taiga.UnreadableBodyError
+	if err != nil && !errors.As(err, &ue) && uncertain(err) {
+		check, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
+		defer cancel()
+		items, lerr := s.list(check, "userstories", url.Values{"owner": {fmt.Sprint(me["id"])}})
+		return nil, unconfirmedCreate(storyKind, "the project", "`taiga story list`", items, lerr, known, me, body, err)
+	}
 	if err != nil {
 		return nil, taiga.ToOutput(err)
 	}
@@ -226,6 +246,22 @@ func (s *Service) CreateStory(ctx context.Context, body Object, dry bool) (any, 
 		return nil, WriteApplied("POST", "userstories", r.Status, fmt.Errorf("the re-read returned another story than id %d", ID(created["id"])))
 	}
 	return s.StoryView(raw)
+}
+
+// ownStories returns the ids of the stories of the project that me created. The owner filter only
+// shortens the list; the owner is checked here too.
+func (s *Service) ownStories(ctx context.Context, me Object) (map[int64]bool, error) {
+	items, err := s.list(ctx, "userstories", url.Values{"owner": {fmt.Sprint(me["id"])}})
+	if err != nil {
+		return nil, err
+	}
+	ids := map[int64]bool{}
+	for _, o := range items {
+		if ID(o["owner"]) == ID(me["id"]) {
+			ids[ID(o["id"])] = true
+		}
+	}
+	return ids, nil
 }
 
 func (s *Service) UpdateStory(ctx context.Context, ref string, p Patch, dry, force bool) (any, error) {
@@ -321,6 +357,9 @@ func (s *Service) writeAssignees(ctx context.Context, path string, before Object
 		base = current
 	}
 	resp, err := s.send(ctx, storyKind, path, before, patch, force)
+	if err != nil && uncertain(err) {
+		return s.confirmAssignees(ctx, path, base, p, patch, err, force)
+	}
 	if err != nil {
 		return nil, taiga.ToOutput(err)
 	}
@@ -345,6 +384,39 @@ func (s *Service) writeAssignees(ctx context.Context, path string, before Object
 		}
 	}
 	return s.StoryView(after)
+}
+
+// confirmAssignees decides an assignee PATCH whose outcome is unknown by re-reading the story,
+// with the checks of the answered write: the other fields sent show their value, the assignees
+// match the request and, unless force, the version is the next one of base. Anything else is
+// story_update_unconfirmed, exit 1: never a repeatable exit 7.
+func (s *Service) confirmAssignees(ctx context.Context, path string, base Object, p Patch, patch Object, sendErr error, force bool) (any, error) {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
+	defer cancel()
+	now, err := Read(rctx, s.API, path, nil)
+	checked := ""
+	if err != nil {
+		checked = "the re-read to check failed: " + output.AsError(err).Error()
+	} else {
+		others := Object{}
+		for k, v := range patch {
+			if !slices.Contains(opaqueKeys, k) {
+				others[k] = v
+			}
+		}
+		problems := append(differences(now, others), assigneeProblems(base, now, p)...)
+		if !force && ID(now["version"]) != ID(base["version"])+1 {
+			problems = append(problems, fmt.Sprintf("the version is %v, not %d", now["version"], ID(base["version"])+1))
+		}
+		if len(problems) == 0 {
+			return s.StoryView(now)
+		}
+		checked = "the re-read does not match the request (" + strings.Join(problems, "; ") + "), but the request may still be running on the server or another write landed next to it"
+	}
+	return nil, &output.Error{Code: "story_update_unconfirmed", Source: taiga.ToOutput(sendErr).Source, Stage: "PATCH " + path,
+		Cause:    fmt.Sprintf("the change may have been applied: PATCH %s failed (%v) and %s", path, sendErr, checked),
+		Recovery: fmt.Sprintf("do not re-run the command blindly: wait, check with `taiga story get %v` and repeat only what is still missing", base["ref"]),
+		Exit:     output.ExitUnexpected}
 }
 
 func assigneesMismatch(path string, status int, after Object, problems []string) error {

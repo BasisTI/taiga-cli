@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BasisTI/taiga-cli/internal/output"
 	"github.com/BasisTI/taiga-cli/internal/taiga"
 )
 
@@ -202,6 +203,7 @@ type statusAPI struct {
 	fieldPosts  []taiga.Request
 	postErr     error
 	created     bool // postErr comes after the status was created
+	listErr     error
 }
 
 func (a *statusAPI) Do(_ context.Context, r taiga.Request) (*taiga.Response, error) {
@@ -270,6 +272,9 @@ func (a *statusAPI) Do(_ context.Context, r taiga.Request) (*taiga.Response, err
 }
 
 func (a *statusAPI) GetAll(_ context.Context, path string, _ url.Values) ([]json.RawMessage, error) {
+	if a.listErr != nil {
+		return nil, a.listErr
+	}
 	items := a.fields
 	if path == "userstory-statuses" {
 		items = a.statuses
@@ -351,10 +356,17 @@ func TestStatusWriterCreateStatusNeverRepeatsThePost(t *testing.T) {
 	if err := statusWriter(a).CreateStatus(context.Background(), desired); !strings.Contains(fmt.Sprint(err), "write_applied") || len(a.posts) != 1 {
 		t.Fatalf("unreadable, missing: %v %d", err, len(a.posts))
 	}
-	// A 5xx is not retried.
-	a = &statusAPI{postErr: &taiga.APIError{Status: 502, Method: "POST", Path: "userstory-statuses"}}
-	if err := statusWriter(a).CreateStatus(context.Background(), desired); exitOf(err) != 7 || len(a.posts) != 1 {
-		t.Fatalf("5xx: %v %d", err, len(a.posts))
+	// A 5xx or a 3xx is never retried nor a repeatable exit 7: status_create_unconfirmed, naming
+	// the status found afterwards, never adopting it (option B).
+	for _, status := range []int{502, 302} {
+		for _, applied := range []bool{true, false} {
+			a = &statusAPI{postErr: &taiga.APIError{Status: status, Method: "POST", Path: "userstory-statuses"}, created: applied}
+			err := statusWriter(a).CreateStatus(context.Background(), desired)
+			e := output.AsError(err)
+			if e.Code != "status_create_unconfirmed" || e.Exit != output.ExitUnexpected || strings.Contains(e.Cause, "has a status with this name") != applied || len(a.posts) != 1 {
+				t.Fatalf("%d applied=%v: %v %d", status, applied, err, len(a.posts))
+			}
+		}
 	}
 }
 
@@ -419,10 +431,32 @@ func TestStatusWriterReorderPostcondition(t *testing.T) {
 	if err := loaded(t, a).Reorder(context.Background(), reordered); err != nil {
 		t.Fatalf("lost answer, applied: %v", err)
 	}
-	// A 5xx that did not apply: the order differs, reported without retry.
-	a = &statusAPI{bulkErr: &taiga.APIError{Status: 502, Method: "POST", Path: "userstory-statuses/bulk_update_order"}}
-	if err := loaded(t, a).Reorder(context.Background(), reordered); exitOf(err) != 4 || len(a.bulks) != 1 {
-		t.Fatalf("5xx: %v %d", err, len(a.bulks))
+	// A 5xx or a 3xx: the re-read decides. Applied and matching is a success; not applied, the
+	// order differs, reported without retry; never a repeatable exit 7.
+	for _, status := range []int{502, 302} {
+		a = &statusAPI{bulkErr: &taiga.APIError{Status: status, Method: "POST", Path: "userstory-statuses/bulk_update_order"}}
+		if err := loaded(t, a).Reorder(context.Background(), reordered); exitOf(err) != 4 || len(a.bulks) != 1 {
+			t.Fatalf("%d: %v %d", status, err, len(a.bulks))
+		}
+		a = &statusAPI{bulkErr: &taiga.APIError{Status: status, Method: "POST", Path: "userstory-statuses/bulk_update_order"}, bulkApplies: true}
+		if err := loaded(t, a).Reorder(context.Background(), reordered); err != nil || len(a.bulks) != 1 {
+			t.Fatalf("%d applied: %v %d", status, err, len(a.bulks))
+		}
+	}
+}
+
+// An uncertain bulk whose re-read fails says nothing about the order: status_order_unconfirmed,
+// exit 1, never the repeatable exit 7 of the send error.
+func TestStatusWriterReorderUncertainWithoutReread(t *testing.T) {
+	for _, status := range []int{502, 302} {
+		a := &statusAPI{bulkErr: &taiga.APIError{Status: status, Method: "POST", Path: "userstory-statuses/bulk_update_order"},
+			afterBulk: func(a *statusAPI) {
+				a.listErr = &taiga.APIError{Status: 503, Method: "GET", Path: "userstory-statuses"}
+			}}
+		err := loaded(t, a).Reorder(context.Background(), reordered)
+		if e := output.AsError(err); e.Code != "status_order_unconfirmed" || e.Exit != output.ExitUnexpected || len(a.bulks) != 1 {
+			t.Fatalf("%d: %v", status, err)
+		}
 	}
 }
 
@@ -507,5 +541,66 @@ func TestApplyIsNotCompleteWithACaseCollision(t *testing.T) {
 	got, err := Apply(context.Background(), f, spec, false)
 	if exitOf(err) != 4 || got.Complete {
 		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+// qaApplyAPI fails every catalog read once a POST was answered: the write is applied, the reads
+// after it fail.
+type qaApplyAPI struct{ *statusAPI }
+
+func (q qaApplyAPI) Do(ctx context.Context, r taiga.Request) (*taiga.Response, error) {
+	resp, err := q.statusAPI.Do(ctx, r)
+	if r.Method == "POST" && err == nil {
+		q.listErr = &taiga.APIError{Status: 502, Method: "GET", Path: "userstory-statuses"}
+	}
+	return resp, err
+}
+
+// After an applied action, a failed read is never a repeatable exit 7 (adversarial review).
+func TestApplyProjectReadFailureAfterAppliedWriteIsNotExit7(t *testing.T) {
+	a := &statusAPI{fields: remoteFields()}
+	statusWriter(a)
+	s := &Service{API: qaApplyAPI{a}, Project: Object{"id": 37, "slug": "infra"}, catalogs: map[string][]Object{}}
+	spec := ProjectSpec{StoryStatus: []StatusSpec{{Name: "In revision", Color: "#8E44AD", After: "Done"}}}
+	got, err := s.ApplyProject(context.Background(), spec, false)
+	e := output.AsError(err)
+	if len(got.Applied) != 1 || e.Code != "project_apply_interrupted" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Cause, "[server_error]") || !strings.Contains(e.Recovery, "taiga project plan") {
+		t.Fatalf("applied %d: %v %q", len(got.Applied), err, e.Recovery)
+	}
+}
+
+// postThenFailReads fails every catalog read with readErr once a POST was sent.
+type postThenFailReads struct {
+	*statusAPI
+	readErr error
+}
+
+func (q postThenFailReads) Do(ctx context.Context, r taiga.Request) (*taiga.Response, error) {
+	resp, err := q.statusAPI.Do(ctx, r)
+	if r.Method == "POST" {
+		q.listErr = q.readErr
+	}
+	return resp, err
+}
+
+// The first action of the plan: Taiga answered 201 but the body was lost, and the read that
+// would settle it fails (3xx, 5xx, network). The status is saved: write_applied, exit 1, never
+// the repeatable exit 7 of the read (review round 1, Codex).
+func TestApplyFirstStatusLostBodyWithFailedRecoveryIsWriteApplied(t *testing.T) {
+	for _, readErr := range []error{
+		&taiga.APIError{Status: 302, Method: "GET", Path: "userstory-statuses"},
+		&taiga.APIError{Status: 503, Method: "GET", Path: "userstory-statuses"},
+		&taiga.NetworkError{Method: "GET", Path: "userstory-statuses", Err: errors.New("connection reset")},
+	} {
+		a := &statusAPI{fields: remoteFields(), created: true,
+			postErr: &taiga.UnreadableBodyError{Method: "POST", Path: "userstory-statuses", Status: 201, Err: errors.New("unexpected EOF")}}
+		statusWriter(a)
+		s := &Service{API: postThenFailReads{a, readErr}, Project: Object{"id": 37, "slug": "infra"}, catalogs: map[string][]Object{}}
+		spec := ProjectSpec{StoryStatus: []StatusSpec{{Name: "ReviewStatus", Color: "#000000"}}}
+		got, err := s.ApplyProject(context.Background(), spec, false)
+		e := output.AsError(err)
+		if e.Code != "write_applied" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Cause, "HTTP 201") || !strings.Contains(e.Recovery, "taiga project plan") || len(a.posts) != 1 || len(got.Applied) != 0 {
+			t.Errorf("%v: applied %d posts %d: %v", readErr, len(got.Applied), len(a.posts), err)
+		}
 	}
 }

@@ -135,14 +135,33 @@ func (w *statusHTTPWriter) CreateStatus(ctx context.Context, desired Object) err
 	const path = "userstory-statuses"
 	r, err := w.service.API.Do(ctx, taiga.Request{Method: "POST", Path: path, Body: body})
 	if err != nil {
-		// 400 on "name": another run created it first (Taiga refuses the same name). A lost
-		// answer: the status may exist. Both are settled by reading, never by a second POST.
+		// 400 on "name": refused, another run created it first (Taiga refuses the same name), so
+		// a failed read is just that read's error. A 2xx with its body lost: the status is
+		// saved, so a failed read must keep that (write_applied), never a repeatable error. Both
+		// are settled by reading, never by a second POST.
 		var ae *taiga.APIError
 		var ue *taiga.UnreadableBodyError
-		if (errors.As(err, &ae) && ae.Status == 400 && hasKey(ae.Body, "name")) || errors.As(err, &ue) {
+		if errors.As(err, &ae) && ae.Status == 400 && hasKey(ae.Body, "name") {
 			if existing, _, rerr := w.existingStatus(ctx, desired); existing != nil || rerr != nil {
 				return rerr
 			}
+		}
+		if errors.As(err, &ue) {
+			existing, _, rerr := w.existingStatus(ctx, desired)
+			var oe *output.Error
+			switch {
+			case existing != nil:
+				return nil
+			case errors.As(rerr, &oe) && oe.Code == "project_changed":
+				return rerr // found, with other values: exit 4, never a repeatable one
+			case rerr != nil:
+				applied := *output.AsError(WriteApplied("POST", path, ue.Status, rerr))
+				applied.Recovery = "do not assume it is missing: the status is saved; run `taiga project plan` to see what is left before applying again"
+				return &applied
+			}
+		}
+		if uncertain(err) {
+			return w.statusUnconfirmed(ctx, fmt.Sprint(desired["name"]), path, err)
 		}
 		return taiga.ToOutput(err)
 	}
@@ -164,6 +183,30 @@ func (w *statusHTTPWriter) CreateStatus(ctx context.Context, desired Object) err
 		w.baseline[fmt.Sprint(confirmed["name"])] = confirmed
 	}
 	return nil
+}
+
+// statusUnconfirmed is status_create_unconfirmed, exit 1, for a POST whose outcome is unknown
+// (network after the connection opened, 5xx, 3xx), like fieldUnconfirmed: a status with the name
+// found afterwards is named, never adopted (option B). Taiga refuses a second status with the
+// same name, so a later apply never duplicates it.
+func (w *statusHTTPWriter) statusUnconfirmed(ctx context.Context, name, path string, sendErr error) error {
+	check, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
+	defer cancel()
+	statuses, err := w.loadStatuses(check)
+	checked := "the project has no status with this name yet, but the request may still be running on the server"
+	if err != nil {
+		checked = "the statuses could not be read to look for it: " + output.AsError(err).Error()
+	} else {
+		for _, st := range statuses {
+			if st["name"] == name {
+				checked = fmt.Sprintf("the project has a status with this name (id %d, color %v, closed %v), but nothing proves this command created it", ID(st["id"]), st["color"], st["is_closed"])
+			}
+		}
+	}
+	return &output.Error{Code: "status_create_unconfirmed", Source: taiga.ToOutput(sendErr).Source, Stage: "POST " + path,
+		Cause:    fmt.Sprintf("the status %q may have been created: POST %s failed (%v) and %s", name, path, sendErr, checked),
+		Recovery: "do not assume it is missing: wait and run `taiga project plan` to see what is left; Taiga refuses a second status with the same name, so it is never created twice",
+		Exit:     output.ExitUnexpected}
 }
 
 // CreateField re-reads the story fields, bypassing the run cache, and refuses a definition that
@@ -225,14 +268,20 @@ func (w *statusHTTPWriter) Reorder(ctx context.Context, names []string) error {
 	}
 	_, werr := w.service.API.Do(ctx, taiga.Request{Method: "POST", Path: statusOrderPath,
 		Body: Object{"project": w.service.Project["id"], "bulk_userstory_statuses": pairs}})
-	var ae *taiga.APIError
-	if errors.As(werr, &ae) && ae.Status < 500 {
-		return taiga.ToOutput(werr) // refused: nothing was written
+	var ue *taiga.UnreadableBodyError
+	lost := errors.As(werr, &ue) // applied, answer lost
+	if werr != nil && !lost && !uncertain(werr) {
+		return taiga.ToOutput(werr) // refused, or never sent: nothing was written
 	}
 	after, rerr := w.loadStatuses(ctx)
 	if rerr != nil {
-		if werr != nil {
+		if lost {
 			return taiga.ToOutput(werr)
+		}
+		if werr != nil {
+			return &output.Error{Code: "status_order_unconfirmed", Source: taiga.ToOutput(werr).Source, Stage: "POST " + statusOrderPath,
+				Cause:    fmt.Sprintf("the order may have been applied: POST %s failed (%v) and the statuses could not be read to check: %s", statusOrderPath, werr, output.AsError(rerr).Error()),
+				Recovery: "do not re-run blindly: wait, check `taiga status list`, then run `taiga project plan` and decide", Exit: output.ExitUnexpected}
 		}
 		return WriteApplied("POST", statusOrderPath, 204, rerr)
 	}
@@ -266,7 +315,16 @@ func (s *Service) ProjectPlan(ctx context.Context, spec ProjectSpec) (ProjectPla
 func (s *Service) ApplyProject(ctx context.Context, spec ProjectSpec, dry bool) (ApplyResult, error) {
 	result, err := Apply(ctx, &statusHTTPWriter{service: s}, spec, dry)
 	if err != nil {
-		return result, taiga.ToOutput(err)
+		e := taiga.ToOutput(err)
+		// Part of the plan is saved: a later failure (a read, mostly) must not look like a
+		// repeatable network error.
+		if len(result.Applied) > 0 && e.Exit == output.ExitNetwork {
+			return result, &output.Error{Code: "project_apply_interrupted", Source: e.Source, Stage: e.Stage,
+				Cause:    fmt.Sprintf("%d action(s) were applied (see applied), then [%s] %s", len(result.Applied), e.Code, e.Cause),
+				Recovery: "do not assume nothing was saved: run `taiga project plan` to see what is left, then apply again (it re-plans and never creates a name twice)",
+				Exit:     output.ExitUnexpected}
+		}
+		return result, e
 	}
 	return result, nil
 }

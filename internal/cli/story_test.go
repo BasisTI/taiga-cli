@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -137,6 +138,9 @@ type storyFake struct {
 	afterComment   func()
 	// afterHistory runs after the first page of each history read of a story is answered.
 	afterHistory func(id int64)
+	// answer applies a request ("METHOD path") as usual and then answers it with this status
+	// and a Location instead (a redirect after the write: the outcome is uncertain).
+	answer map[string]int
 	// swimlanes is the swimlane catalog; defaultSwimlane is the project's default_swimlane.
 	swimlanes       []map[string]any
 	defaultSwimlane any
@@ -234,8 +238,10 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/")
-	q := r.URL.Query()
 	if status, ok := f.fail[r.Method+" "+path]; ok {
+		if status >= 300 && status < 400 {
+			w.Header().Set("Location", "https://elsewhere.example/api/v1/"+path)
+		}
 		w.WriteHeader(status)
 		body := `{"_error_message":"injected"}`
 		if f.failBody != "" {
@@ -244,6 +250,19 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, body)
 		return
 	}
+	if status, ok := f.answer[r.Method+" "+path]; ok {
+		f.serve(httptest.NewRecorder(), r, path) // applied; the answer is replaced
+		w.Header().Set("Location", "https://elsewhere.example/api/v1/"+path)
+		w.WriteHeader(status)
+		_, _ = fmt.Fprintf(w, `<p>The document has moved <a href="https://elsewhere.example/api/v1/%s">here</a>.</p>`, path)
+		return
+	}
+	f.serve(w, r, path)
+}
+
+// serve handles a request that is not an injected failure.
+func (f *storyFake) serve(w http.ResponseWriter, r *http.Request, path string) {
+	q := r.URL.Query()
 	project := func() bool {
 		if q.Get("project") != "37" {
 			f.t.Errorf("%s %s without project=37: %s", r.Method, path, r.URL.RawQuery)
@@ -347,7 +366,7 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.nextID++
-		s := map[string]any{"id": f.nextID, "ref": 300, "project": 37, "version": 1, "tags": []any{}, "status": 1}
+		s := map[string]any{"id": f.nextID, "ref": 300, "project": 37, "version": 1, "tags": []any{}, "status": 1, "owner": 5}
 		if path == "tasks" { // the defaults the probe observed for a minimal POST
 			for k, v := range map[string]any{"ref": 301, "status": 11, "owner": 5, "is_closed": false, "description": "", "due_date": nil, "assigned_to": nil,
 				"is_blocked": false, "blocked_note": "", "milestone": nil, "attachments": []any{}} {
@@ -729,7 +748,8 @@ func TestStoryHTTPErrorsMapToExitCodes(t *testing.T) {
 		{"GET userstories/by_ref", 403, 6},
 		{"GET projects/by_slug", 404, 5},
 		{"PATCH userstories/6808", 409, 4},
-		{"PATCH userstories/6808", 503, 7},
+		{"PATCH userstories/6808", 503, 1}, // sent, not applied: story_update_unconfirmed, never a repeatable 7
+		{"PATCH userstories/6808", 302, 1},
 	} {
 		f, calls := newStoryFake(t)
 		f.fail[tc.fail] = tc.status
@@ -740,8 +760,10 @@ func TestStoryHTTPErrorsMapToExitCodes(t *testing.T) {
 		if strings.Contains(stderr, "tok") {
 			t.Errorf("token leaked: %s", stderr)
 		}
-		if n := len(writes(calls)); tc.status == 503 && n != 1 {
-			t.Errorf("PATCH repeated after 503: %d", n)
+		if n := len(writes(calls)); tc.status >= 300 && tc.status < 400 || tc.status >= 500 {
+			if n != 1 || !strings.Contains(stderr, "story_update_unconfirmed") {
+				t.Errorf("PATCH after %d: %d writes %s", tc.status, n, stderr)
+			}
 		}
 	}
 }

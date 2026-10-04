@@ -198,7 +198,7 @@ func (s *Service) SetFieldValues(ctx context.Context, kind string, id int64, ent
 func (s *Service) writeValues(ctx context.Context, k kind, path string, before, merged Object, check string, force bool) (Object, error) {
 	patch := Object{"attributes_values": merged}
 	resp, err := confirmed(s.API.Do(ctx, taiga.Request{Method: "PATCH", Path: path, Body: map[string]any{"attributes_values": merged, "version": before["version"]}}))
-	if err != nil && k.confirmUncertain && uncertain(err) {
+	if err != nil && uncertain(err) {
 		next := ID(before["version"]) + 1
 		if force {
 			next = 0 // --force-version skips the version check; the values are still compared

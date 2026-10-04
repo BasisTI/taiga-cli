@@ -225,8 +225,8 @@ Consequência na CLI: `field create` é idempotente pela leitura do catálogo an
 mesma definição entre a leitura e o `POST`, o 400 em `name` faz a CLI reler e aceitar a definição só se for
 compatível (mesmo tipo e, se `--description` foi dado, mesma descrição). O `POST` nunca é repetido. Limite não
 sondado: se os dois `POST` passarem juntos pelo validador, quem recusa é o `unique_together` do banco, o que pode
-virar 500 (`server_error`, exit 7) em vez do 400; a unicidade continua garantida e repetir o comando encontra a
-definição. A CLI também recusa `=` no nome, porque `story field set` corta a atribuição no primeiro `=`. Definições
+virar 500 em vez do 400, que a CLI trata como resultado incerto (`field_create_unconfirmed`, exit 1, US #274); a
+unicidade continua garantida e repetir o comando encontra a definição. A CLI também recusa `=` no nome, porque `story field set` corta a atribuição no primeiro `=`. Definições
 existentes nunca são alteradas nem apagadas.
 
 ### Valores
@@ -339,13 +339,14 @@ Consequências na CLI (`story comment`):
   ocultada);
 - resposta 2xx ilegível (`UnreadableBodyError`, corpo truncado) segue o caminho de releitura das outras escritas: o
   status já confirma a gravação; se a releitura falhar, `write_applied`;
-- erro sem resposta conclusiva (rede depois de aberta a conexão, timeout ou 5xx): antes do `PATCH` a CLI guarda os
-  ids dos comentários do próprio usuário (`users/me`) com exatamente o mesmo texto; depois da falha relê o histórico.
-  Um id novo com o texto = publicado (sucesso, story relida). Nenhum, ou histórico ilegível = `comment_unconfirmed`
-  (exit 1): a ausência não prova que o `PATCH` falhou, porque um gateway pode responder 503 enquanto o servidor ainda
-  grava, e o comentário aparece depois da conferência (achado da revisão do PR #7: um script que repetia o exit 7
-  criou duas cópias). O erro de rede original (exit 7, repetível) só sai quando a conexão nem abriu (DNS, conexão
-  recusada).
+- erro sem resposta conclusiva (rede depois de aberta a conexão, timeout, 5xx ou redirect 3xx, que a CLI nunca
+  segue): antes do `PATCH` a CLI guarda os ids dos comentários do próprio usuário (`users/me`) com exatamente o
+  mesmo texto; depois da falha relê o histórico e sai **sempre** com `comment_unconfirmed` (exit 1), nomeando os ids
+  novos com o texto, se houver. Um id novo não prova que veio deste `PATCH` (outro processo da mesma conta pode ter
+  publicado o mesmo texto; decisão de 2026-10-03, opção B, estendida ao comentário na US #274), e a ausência não
+  prova que o `PATCH` falhou, porque um gateway pode responder 503 enquanto o servidor ainda grava, e o comentário
+  aparece depois da conferência (achado da revisão do PR #7: um script que repetia o exit 7 criou duas cópias). O
+  erro de rede original (exit 7, repetível) só sai quando a conexão nem abriu (DNS, conexão recusada).
 
 ### Leitura: `GET history/userstory/<id>`
 
@@ -452,8 +453,9 @@ mesmo padrão dos responsáveis (US #247). Constante `statusOrderCheckedWrite = 
 - **antes:** relê o catálogo logo antes do bulk; se algum status apareceu, sumiu, mudou de nome, de id ou de `order`
   desde a leitura do plano (mais os criados pelo próprio apply), recusa com `project_changed` (exit 4) sem enviar;
 - **depois:** relê e exige exatamente a ordem pretendida. Se não bate, `status_order_postcondition_failed` (exit 4),
-  dizendo que a escrita **foi aplicada** (ou teve resultado incerto, em rede/5xx) e para não repetir às cegas. 4xx do
-  bulk é recusa: o erro dele, sem conferência. Resposta perdida depois do 2xx: vale a releitura;
+  dizendo que a escrita **foi aplicada** (ou teve resultado incerto, em rede/5xx/3xx) e para não repetir às cegas. 4xx do
+  bulk é recusa: o erro dele, sem conferência. Resposta perdida depois do 2xx: vale a releitura. Resultado incerto e
+  releitura que falha: `status_order_unconfirmed` (exit 1);
 - nunca há repetição automática do bulk. Como o bulk grava posições absolutas, rodar o apply de novo depois de
   conferir é seguro: ele replaneja e confere outra vez;
 - limite: uma mudança que cai entre a releitura e o bulk é sobrescrita; só é detectada se deixar outra ordem na
