@@ -107,13 +107,28 @@ var shellNoop = map[string]string{"bash": ":", "zsh": ":", "fish": "true", "powe
 // debugArgs is the one double-quoted argument of a call to the debug writer, and nothing after.
 var debugArgs = regexp.MustCompile(`^\s+"(?:[^"\\]|\\.)*"$`)
 
-// withoutShellDebug drops the definition of writer, from its first line to the "}" or "end"
-// that closes it at the margin, and turns each call into noop. The body in between is
-// indented: any other line at the margin is refused, so a writer closed otherwise never takes
-// the next function with it. A call must be a line of its own with at most one quoted
-// argument: anything after it would go with the line. Anything left that names the writer or
-// the variable is an error, never a script.
+// withoutShellDebug is script without the debug writer and with each call to it turned into
+// noop, or an error and no script. Cutting goes by the text (dropShellDebug), which a change
+// of Cobra's format could fool; what comes out is then checked against script without
+// relying on that format (onlyDebugDropped): every function but the writer is still
+// declared, and nothing else changed. A script that fails the check is refused.
 func withoutShellDebug(script, writer, noop string) (string, error) {
+	out, err := dropShellDebug(script, writer, noop)
+	if err == nil {
+		err = onlyDebugDropped(script, out, writer, noop)
+	}
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// dropShellDebug drops the definition of writer, from its first line to the "}" or "end"
+// that closes it at the margin, and turns each call into noop. A line at the margin inside
+// the writer (other than its braces) is refused; a call must be a line of its own with at
+// most one quoted argument, since anything after it would go with the line. Anything left
+// that names the writer or the variable is an error.
+func dropShellDebug(script, writer, noop string) (string, error) {
 	var b strings.Builder
 	inWriter := false
 	for _, line := range strings.SplitAfter(script, "\n") {
@@ -145,4 +160,83 @@ func withoutShellDebug(script, writer, noop string) (string, error) {
 		return "", fmt.Errorf("the %s completion script still logs to BASH_COMP_DEBUG_FILE", writer)
 	}
 	return out, nil
+}
+
+// declaration finds a function declared on a line, in any of the four scripts and at any
+// indent: "name()" and "function name" (bash, zsh), "function name" (fish), "function name",
+// "filter name" and "[scriptblock]${name} =" (PowerShell).
+var declaration = regexp.MustCompile(`^\s*(?:(?:function|filter)\s+([^\s(){}]+)|([A-Za-z_][\w:.-]*)\s*\(\)|\[scriptblock\]\$\{([^}]+)\}\s*=)`)
+
+// declared is the function a line declares, or "".
+func declared(line string) string {
+	m := declaration.FindStringSubmatch(line)
+	if m == nil {
+		return ""
+	}
+	return m[1] + m[2] + m[3]
+}
+
+// onlyDebugDropped checks out against script, line by line: each line is kept as is, or is a
+// call to writer that became noop (dropped when noop is ""), or belongs to one run of lines
+// that starts where writer is declared, ends on "}" or "end" and declares nothing else. It
+// also checks that every function script declares, writer aside, is still declared in out.
+func onlyDebugDropped(script, out, writer, noop string) error {
+	fail := func(format string, args ...any) error {
+		return fmt.Errorf("the completion script changed beyond its debug log: "+format, args...)
+	}
+	count := func(text string) map[string]int {
+		names := map[string]int{}
+		for _, line := range strings.Split(text, "\n") {
+			if name := declared(line); name != "" {
+				names[name]++
+			}
+		}
+		return names
+	}
+	want, got := count(script), count(out)
+	delete(want, writer)
+	for name, n := range want {
+		if got[name] != n {
+			return fail("%s is declared %d times, %d before", name, got[name], n)
+		}
+	}
+	if len(got) != len(want) {
+		return fail("it declares %d functions, %d before", len(got), len(want))
+	}
+	o, f := strings.Split(script, "\n"), strings.Split(out, "\n")
+	i, j, runs := 0, 0, 0
+	for i < len(o) {
+		trimmed := strings.TrimSpace(o[i])
+		switch {
+		case j < len(f) && o[i] == f[j]:
+			i, j = i+1, j+1
+		case trimmed == writer || strings.HasPrefix(trimmed, writer+" ") || strings.HasPrefix(trimmed, writer+"\t"):
+			if noop != "" {
+				if j >= len(f) || f[j] != o[i][:len(o[i])-len(strings.TrimLeft(o[i], " \t"))]+noop {
+					return fail("line %d: a call to %s did not become %q", i+1, writer, noop)
+				}
+				j++
+			}
+			i++
+		case declared(o[i]) == writer && runs == 0:
+			runs++
+			k := i + 1
+			for k < len(o) && (j >= len(f) || o[k] != f[j]) {
+				if name := declared(o[k]); name != "" {
+					return fail("line %d: %s went with the writer", k+1, name)
+				}
+				k++
+			}
+			if last := strings.TrimSpace(o[k-1]); last != "}" && last != "end" {
+				return fail("line %d: the writer does not end on a closing line", k)
+			}
+			i = k
+		default:
+			return fail("line %d (%q) is missing", i+1, o[i])
+		}
+	}
+	if j != len(f) {
+		return fail("%d lines were added", len(f)-j)
+	}
+	return nil
 }

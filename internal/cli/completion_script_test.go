@@ -115,14 +115,22 @@ func TestCompletionScriptFilterFailsClosed(t *testing.T) {
 			t.Errorf("%q: no error, got %q", script, got)
 		}
 	}
-	// A writer closed with an indent (a change of Cobra's format) is refused, not run on into
-	// the next function.
-	for _, m := range []struct{ shell, from, to string }{
-		{"bash", "\n}\n", "\n    }\n"}, {"zsh", "\n}\n", "\n    }\n"}, {"fish", "\nend\n", "\n    end\n"}, {"powershell", "\n}\n", "\n    }\n"},
-	} {
-		script := strings.Replace(cobraScript(t, m.shell, true), m.from, m.to, 1)
-		if got, err := withoutShellDebug(script, "__taiga_debug", testNoop[m.shell]); err == nil {
-			t.Errorf("%s with the writer closed by %q: no error, got %d bytes", m.shell, m.to, len(got))
+	// Changes of Cobra's format that would make the filter take the next function with the
+	// writer are refused, with no script: the writer closed with an indent (round 2), and also
+	// every line up to the next function's closing one, its declaration included (round 3).
+	for _, shell := range completionShells {
+		end := "\n}\n"
+		if shell == "fish" {
+			end = "\nend\n"
+		}
+		cobra := cobraScript(t, shell, true)
+		for name, script := range map[string]string{
+			"writer closed with an indent":   strings.Replace(cobra, end, "\n    "+end[1:], 1),
+			"next function indented as well": indentFollowing(t, cobra, end),
+		} {
+			if got, err := withoutShellDebug(script, "__taiga_debug", testNoop[shell]); err == nil || got != "" {
+				t.Errorf("%s, %s: error %v, got %d bytes", shell, name, err, len(got))
+			}
 		}
 	}
 	got, err := withoutShellDebug("f() {\n    __taiga_debug \"a \\\"b\\\" ${c}\"\n    __taiga_debug\n}\n", "__taiga_debug", ":")
@@ -145,6 +153,63 @@ func requireShell(t *testing.T, exe string) {
 		}
 	}
 	t.Skipf("%s is not installed", exe)
+}
+
+// The check on the output holds for the real scripts and refuses any other change: a
+// function gone, a line gone or added, a call left without its no-op.
+func TestCompletionScriptCheckRefusesOtherChanges(t *testing.T) {
+	for _, shell := range completionShells {
+		cobra, out := cobraScript(t, shell, true), generatedScript(t, shell, true)
+		if err := onlyDebugDropped(cobra, out, "__taiga_debug", testNoop[shell]); err != nil {
+			t.Fatalf("%s: %v", shell, err)
+		}
+		lines := strings.Split(out, "\n")
+		without := func(i int) string {
+			return strings.Join(append(append([]string{}, lines[:i]...), lines[i+1:]...), "\n")
+		}
+		mutations := map[string]string{"a line added": out + "echo x\n"}
+		for i, line := range lines {
+			if name := declared(line); name != "" && mutations["a declaration gone"] == "" {
+				mutations["a declaration gone"] = without(i)
+			}
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			if strings.TrimSpace(line) == testNoop[shell] && mutations["a no-op gone"] == "" {
+				mutations["a no-op gone"] = without(i)
+			} else if declared(line) == "" {
+				mutations["a line gone"] = without(i) // the last plain line
+			}
+		}
+		for name, mutated := range mutations {
+			if err := onlyDebugDropped(cobra, mutated, "__taiga_debug", testNoop[shell]); err == nil {
+				t.Errorf("%s, %s: accepted", shell, name)
+			}
+		}
+	}
+}
+
+// indentFollowing indents the writer's closing line (the first end at the margin) and every
+// line after it up to the next one, which closes the next function and stays at the margin.
+func indentFollowing(t *testing.T, script, end string) string {
+	t.Helper()
+	start := strings.Index(script, end) + 1
+	stop := start + len(end) - 1
+	next := strings.Index(script[stop:], end)
+	if start == 0 || next < 0 {
+		t.Fatalf("no closing line %q", end)
+	}
+	next += stop + 1
+	var b strings.Builder
+	b.WriteString(script[:start])
+	for _, line := range strings.SplitAfter(script[start:next], "\n") {
+		if strings.TrimSpace(line) != "" {
+			b.WriteString("    ")
+		}
+		b.WriteString(line)
+	}
+	b.WriteString(script[next:])
+	return b.String()
 }
 
 // parsers check a script without running it.
