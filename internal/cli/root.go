@@ -48,7 +48,11 @@ func (a *App) root() *cobra.Command {
 		Short:         "Command line client for the Taiga REST API",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		PersistentPreRunE: func(*cobra.Command, []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if cmd.Name() == cobra.ShellCompRequestCmd {
+				completeRedacted(cmd)
+				return nil
+			}
 			// Flags parsed: from here on errors come from the command, not from cobra.
 			a.ran = true
 			_, err := output.DetectMode(a.output, a.OutTTY)
@@ -81,6 +85,7 @@ func (a *App) root() *cobra.Command {
 	root.AddCommand(a.userCmd())
 	root.AddCommand(a.milestoneCmd())
 	root.AddCommand(a.epicCmd())
+	a.completionCmd(root)
 	return root
 }
 

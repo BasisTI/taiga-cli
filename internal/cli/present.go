@@ -76,6 +76,13 @@ func (l *lineRedactor) flush() {
 	}
 }
 
+// writeScript prints a generated completion script on Cobra's stdout, the lineRedactor that
+// carried Cobra's own script.
+func (a *App) writeScript(cmd *cobra.Command, s string) error {
+	_, err := io.WriteString(cmd.OutOrStdout(), s)
+	return err
+}
+
 // emitJSON, emitFields, emitOut and emitErr write presented content, without redacting again.
 func (a *App) emitJSON(v any) error { return output.WriteJSON(a.Out, v) }
 

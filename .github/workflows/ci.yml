@@ -14,9 +14,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y dbus
+      - run: sudo apt-get update && sudo apt-get install -y dbus zsh fish
       - run: go vet ./...
       - run: go test -race ./...
+      # The completion scripts run in each shell; a missing one fails instead of skipping.
+      - run: go test -v -count=1 -run '^TestCompletionScripts' ./internal/cli
+        env:
+          TAIGA_TEST_SHELLS: bash,zsh,fish,pwsh
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.14.0
