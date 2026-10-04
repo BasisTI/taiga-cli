@@ -33,7 +33,7 @@ GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.3.
 ## Skill
 
 ```sh
-npx skills add BasisTI/taiga-cli            # instala esta skill
+npx skills add BasisTI/taiga-cli --global   # instala esta skill para todos os projetos
 npx skills update --global --yes            # a cópia instalada não se atualiza sozinha
 ```
 
