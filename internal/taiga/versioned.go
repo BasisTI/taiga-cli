@@ -70,7 +70,7 @@ func (c *Client) WriteVersionedFrom(ctx context.Context, method, path string, pa
 	}
 	second, err := c.getObject(ctx, stagePath(path))
 	if err != nil {
-		return nil, err
+		return nil, &RefusedWriteError{Err: err}
 	}
 	if !force {
 		if changed := changedKeys(patch, first, second); len(changed) > 0 {

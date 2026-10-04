@@ -322,6 +322,12 @@ func afterWrite(err error, code, saved, doNot, finish string, ref any) error {
 // invitation to run the command again (that would create a second story).
 func (s *Service) CreateStoryWithEpic(ctx context.Context, body Object, epic Object, dry bool) (any, error) {
 	created, err := s.CreateStory(ctx, body, dry)
+	if e, ok := err.(*output.Error); ok && e.Code == "story_create_unconfirmed" {
+		// The story may exist without its epic: the link is never made for a story not confirmed.
+		out := *e
+		out.Recovery += fmt.Sprintf("; the epic was not linked: once you pick the story, link it with `taiga epic link %v REF`", epic["ref"])
+		return nil, &out
+	}
 	if err != nil {
 		return nil, err
 	}

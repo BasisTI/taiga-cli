@@ -217,10 +217,12 @@ func (s *Service) send(ctx context.Context, k kind, path string, before, patch O
 
 // uncertain is a failed write that Taiga may have applied: the request left (the connection
 // opened) and no answer said what happened: a network error, a 5xx, or a 3xx, which the client
-// never follows and a proxy may have answered after passing the request on.
+// never follows and a proxy may have answered after passing the request on. A read that failed
+// after Taiga refused the write is not one: nothing was written.
 func uncertain(err error) bool {
 	var ae *taiga.APIError
-	return !taiga.NotSent(err) && (unknownOutcome(err) || errors.As(err, &ae) && ae.Status >= 300 && ae.Status < 400)
+	var refused *taiga.RefusedWriteError
+	return !errors.As(err, &refused) && !taiga.NotSent(err) && (unknownOutcome(err) || errors.As(err, &ae) && ae.Status >= 300 && ae.Status < 400)
 }
 
 // confirmPatch decides a PATCH whose outcome is unknown by re-reading the resource: when every

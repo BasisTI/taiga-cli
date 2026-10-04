@@ -543,3 +543,28 @@ func TestApplyIsNotCompleteWithACaseCollision(t *testing.T) {
 		t.Fatalf("%+v %v", got, err)
 	}
 }
+
+// qaApplyAPI fails every catalog read once a POST was answered: the write is applied, the reads
+// after it fail.
+type qaApplyAPI struct{ *statusAPI }
+
+func (q qaApplyAPI) Do(ctx context.Context, r taiga.Request) (*taiga.Response, error) {
+	resp, err := q.statusAPI.Do(ctx, r)
+	if r.Method == "POST" && err == nil {
+		q.listErr = &taiga.APIError{Status: 502, Method: "GET", Path: "userstory-statuses"}
+	}
+	return resp, err
+}
+
+// After an applied action, a failed read is never a repeatable exit 7 (adversarial review).
+func TestApplyProjectReadFailureAfterAppliedWriteIsNotExit7(t *testing.T) {
+	a := &statusAPI{fields: remoteFields()}
+	statusWriter(a)
+	s := &Service{API: qaApplyAPI{a}, Project: Object{"id": 37, "slug": "infra"}, catalogs: map[string][]Object{}}
+	spec := ProjectSpec{StoryStatus: []StatusSpec{{Name: "In revision", Color: "#8E44AD", After: "Done"}}}
+	got, err := s.ApplyProject(context.Background(), spec, false)
+	e := output.AsError(err)
+	if len(got.Applied) != 1 || e.Code != "project_apply_interrupted" || e.Exit != output.ExitUnexpected || !strings.Contains(e.Cause, "[server_error]") || !strings.Contains(e.Recovery, "taiga project plan") {
+		t.Fatalf("applied %d: %v %q", len(got.Applied), err, e.Recovery)
+	}
+}

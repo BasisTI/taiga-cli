@@ -239,6 +239,9 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/")
 	if status, ok := f.fail[r.Method+" "+path]; ok {
+		if status >= 300 && status < 400 {
+			w.Header().Set("Location", "https://elsewhere.example/api/v1/"+path)
+		}
 		w.WriteHeader(status)
 		body := `{"_error_message":"injected"}`
 		if f.failBody != "" {
@@ -251,6 +254,7 @@ func (f *storyFake) handle(w http.ResponseWriter, r *http.Request) {
 		f.serve(httptest.NewRecorder(), r, path) // applied; the answer is replaced
 		w.Header().Set("Location", "https://elsewhere.example/api/v1/"+path)
 		w.WriteHeader(status)
+		_, _ = fmt.Fprintf(w, `<p>The document has moved <a href="https://elsewhere.example/api/v1/%s">here</a>.</p>`, path)
 		return
 	}
 	f.serve(w, r, path)

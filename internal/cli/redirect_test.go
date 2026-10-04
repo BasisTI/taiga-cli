@@ -71,6 +71,7 @@ func TestEveryCuratedWriteRedirectIsUncertain(t *testing.T) {
 					f.answer = map[string]int{tc.request: status}
 				} else {
 					f.fail[tc.request] = status
+					f.failBody = `<p>The document has moved <a href="https://elsewhere.example/x">here</a>.</p>`
 				}
 				out, stderr, code := runIn(t, f.env(), "", tc.args...)
 				wantExit, wantCode := tc.missingExit, tc.missingCode
@@ -97,6 +98,12 @@ func TestEveryCuratedWriteRedirectIsUncertain(t *testing.T) {
 					t.Errorf("%s %d %s: %q not named: %s", tc.name, status, label, tc.found, stderr)
 				case strings.Contains(stderr, "elsewhere.example"):
 					t.Errorf("%s %d %s: Location echoed: %s", tc.name, status, label, stderr)
+				}
+				if tc.name == "story create --epic" && !strings.Contains(stderr, "taiga epic link 91 REF") {
+					t.Errorf("%s %d %s: the recovery does not finish the link: %s", tc.name, status, label, stderr)
+				}
+				if tc.name == "story create --epic" && !strings.Contains(stderr, "taiga epic link 91 REF") {
+					t.Errorf("%s %d %s: the recovery does not finish the link: %s", tc.name, status, label, stderr)
 				}
 				for _, c := range writes(calls) {
 					if tc.name == "story create --epic" && strings.Contains(c.path, "related_userstories") {
@@ -131,6 +138,20 @@ func TestStoryAssigneesRedirectNextToAnotherWrite(t *testing.T) {
 		_, stderr, code := runIn(t, f.env(), "", args...)
 		if force && code != 0 || !force && (code != 1 || !strings.Contains(stderr, "story_update_unconfirmed") || !strings.Contains(stderr, "the version is 9, not 8")) || len(writes(calls)) != 1 {
 			t.Fatalf("force=%v: %d %s", force, code, stderr)
+		}
+	}
+}
+
+// A PATCH refused for its version (nothing written) whose re-read for the guarded retry fails is
+// that read's error, never "may have been applied" (adversarial review): repeating is safe.
+func TestRefusedPatchWithFailedRereadIsTheReadError(t *testing.T) {
+	for _, status := range []int{503, 302} {
+		f, calls := newStoryFake(t)
+		f.fail["GET userstories/6808"] = status
+		f.onPatch = func(s map[string]any) { s["version"] = 8 } // someone else wrote: our version 7 is refused
+		_, stderr, code := runIn(t, f.env(), "", "story", "update", "246", "--subject", "x")
+		if code != 7 || strings.Contains(stderr, "unconfirmed") || strings.Contains(stderr, "may have been applied") || len(writes(calls)) != 1 {
+			t.Errorf("%d: exit %d %s", status, code, stderr)
 		}
 	}
 }

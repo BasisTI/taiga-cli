@@ -299,7 +299,16 @@ func (s *Service) ProjectPlan(ctx context.Context, spec ProjectSpec) (ProjectPla
 func (s *Service) ApplyProject(ctx context.Context, spec ProjectSpec, dry bool) (ApplyResult, error) {
 	result, err := Apply(ctx, &statusHTTPWriter{service: s}, spec, dry)
 	if err != nil {
-		return result, taiga.ToOutput(err)
+		e := taiga.ToOutput(err)
+		// Part of the plan is saved: a later failure (a read, mostly) must not look like a
+		// repeatable network error.
+		if len(result.Applied) > 0 && e.Exit == output.ExitNetwork {
+			return result, &output.Error{Code: "project_apply_interrupted", Source: e.Source, Stage: e.Stage,
+				Cause:    fmt.Sprintf("%d action(s) were applied (see applied), then [%s] %s", len(result.Applied), e.Code, e.Cause),
+				Recovery: "do not assume nothing was saved: run `taiga project plan` to see what is left, then apply again (it re-plans and never creates a name twice)",
+				Exit:     output.ExitUnexpected}
+		}
+		return result, e
 	}
 	return result, nil
 }

@@ -19,7 +19,16 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	return fmt.Sprintf("%s %s: HTTP %d: %s", e.Method, stagePath(e.Path), e.Status, truncate(e.Body))
+	return fmt.Sprintf("%s %s: HTTP %d: %s", e.Method, stagePath(e.Path), e.Status, e.cause())
+}
+
+// cause is the body Taiga answered, truncated. A redirect's body is left out: it names where the
+// redirect points, which the CLI never follows and must not echo.
+func (e *APIError) cause() string {
+	if e.Status >= 300 && e.Status < 400 {
+		return "redirect not followed"
+	}
+	return truncate(e.Body)
 }
 
 // IsVersionConflict reports Taiga's optimistic-concurrency rejection: 409 or 412 (precondition
@@ -64,6 +73,13 @@ func (e *UnreadableBodyError) Error() string {
 	return fmt.Sprintf("%s %s returned HTTP %d, but its body could not be read: %s", e.Method, stagePath(e.Path), e.Status, transportCause(e.Err))
 }
 func (e *UnreadableBodyError) Unwrap() error { return e.Err }
+
+// RefusedWriteError is a read that failed after Taiga refused the write (a version conflict):
+// nothing was written, so the read's error is the outcome, never an uncertain write.
+type RefusedWriteError struct{ Err error }
+
+func (e *RefusedWriteError) Error() string { return e.Err.Error() }
+func (e *RefusedWriteError) Unwrap() error { return e.Err }
 
 // ConflictError means another writer changed the fields we are updating.
 type ConflictError struct {
@@ -138,7 +154,7 @@ func ToOutput(err error) *output.Error {
 	if !errors.As(err, &ae) {
 		return output.AsError(err)
 	}
-	e := &output.Error{Source: "api", Stage: ae.Method + " " + stagePath(ae.Path), Cause: truncate(ae.Body)}
+	e := &output.Error{Source: "api", Stage: ae.Method + " " + stagePath(ae.Path), Cause: ae.cause()}
 	switch {
 	case ae.Status == 401:
 		e.Code, e.Exit, e.Recovery = "auth_rejected", output.ExitAuth, "run `taiga auth status --diagnose`"
