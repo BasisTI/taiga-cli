@@ -8,15 +8,41 @@
 
 ## Install
 
+Install the binary in `~/.local/bin` (it must be on your `PATH`). The commands below use `v0.3.0`, which exists only once that release is published; until then, use the latest tag on [GitHub Releases](https://github.com/BasisTI/taiga-cli/releases).
+
+Download the tarball for your platform together with `SHA256SUMS`; the binary is installed only if its checksum matches. The block runs in a subshell with `set -eu`, so any failing step (download, a missing or failed checksum, extraction) stops it before anything is installed, and your shell stays open. On macOS, where `sha256sum` may be missing, it uses `shasum -a 256`:
+
 ```sh
-go install github.com/BasisTI/taiga-cli/cmd/taiga@latest
+(
+  set -eu
+  V=0.3.0
+  P=linux_amd64   # linux_arm64, darwin_amd64 or darwin_arm64
+  F="taiga_${V}_${P}.tar.gz"
+  cd "$(mktemp -d)"
+  gh release download "v$V" -R BasisTI/taiga-cli -p "$F" -p SHA256SUMS
+  awk -v f="$F" '$2 == f' SHA256SUMS > checksum
+  test -s checksum || { echo "$F is not in SHA256SUMS" >&2; exit 1; }
+  if command -v sha256sum >/dev/null; then sha256sum -c checksum; else shasum -a 256 -c checksum; fi
+  tar -xzf "$F" taiga
+  mkdir -p "$HOME/.local/bin"
+  install -m 0755 taiga "$HOME/.local/bin/taiga"
+  "$HOME/.local/bin/taiga" version
+)
 ```
 
-Or download the tarball for your platform from [GitHub Releases](https://github.com/BasisTI/taiga-cli/releases), together with `SHA256SUMS`, and check it:
+Or, with Go:
 
 ```sh
-sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf taiga_*_linux_amd64.tar.gz taiga && sudo install taiga /usr/local/bin/
+GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.3.0
+```
+
+### Agent skill
+
+[`skills/taiga-cli/SKILL.md`](skills/taiga-cli/SKILL.md) teaches coding agents to use the CLI (in Portuguese): which command to use, how to stop and ask a person on authentication errors, and what to check after an uncertain write instead of repeating it. Install it with the [skills CLI](https://github.com/vercel-labs/skills):
+
+```sh
+npx skills add BasisTI/taiga-cli --global   # for every project
+npx skills update --global --yes            # the installed copy never updates itself
 ```
 
 ## Quickstart
@@ -282,6 +308,8 @@ taiga auth status --diagnose --output text
 The last check, `project`, reads the selected project (it only reads) and reports its `id`, `slug` and where it was selected; whether you are a member and an admin; the permissions the curated commands need that you lack (`view_us`, `modify_us`, `add_us`, `comment_us`, `view_tasks`, `add_task`, `modify_task`, `modify_epic`, `admin_project_values`); the epics, kanban and backlog modules; and the number of swimlanes. JSON output also carries them under `data`. It is `skipped` without a selected project or when the identity check (`users/me`) failed, and `failed` when the project cannot be read: it does not exist, the account cannot see it, or another error (network, server) stopped the read. Missing permissions do not fail it: they limit some commands (`project apply` needs `admin_project_values`).
 
 ## Coding agents and sandboxes
+
+The [agent skill](#agent-skill) carries these rules for agents.
 
 - A person runs `taiga auth login` once per machine; agents only read the session cache and never see the password.
 - An agent that gets `session_expired` inside a sandbox cannot renew the session there: run `taiga auth refresh` outside the sandbox and retry. `taiga` never spends the stored refresh token when it cannot save the new one, and with a read-only cache it logs in only with `TAIGA_PASSWORD`/`TAIGA_PASSWORD_FILE` (keeping that token in memory), never with the keyring, `secret_command` or the `--insecure-storage` file, whether or not a session exists. Without a session and without an env password it fails with `session_cache_readonly`: run `taiga auth login` outside the sandbox.
