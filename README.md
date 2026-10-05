@@ -8,14 +8,14 @@
 
 ## Install
 
-Install the binary in `~/.local/bin` (it must be on your `PATH`). The commands below use `v0.3.0`, which exists only once that release is published; until then, use the latest tag on [GitHub Releases](https://github.com/BasisTI/taiga-cli/releases).
+Install the binary in `~/.local/bin` (it must be on your `PATH`). The commands below use `v0.4.0`, which exists only once that release is published; until then, use the latest tag on [GitHub Releases](https://github.com/BasisTI/taiga-cli/releases).
 
 Download the tarball for your platform together with `SHA256SUMS`; the binary is installed only if its checksum matches. The block runs in a subshell with `set -eu`, so any failing step (download, a missing or failed checksum, extraction) stops it before anything is installed, and your shell stays open. On macOS, where `sha256sum` may be missing, it uses `shasum -a 256`:
 
 ```sh
 (
   set -eu
-  V=0.3.0
+  V=0.4.0
   P=linux_amd64   # linux_arm64, darwin_amd64 or darwin_arm64
   F="taiga_${V}_${P}.tar.gz"
   cd "$(mktemp -d)"
@@ -33,7 +33,7 @@ Download the tarball for your platform together with `SHA256SUMS`; the binary is
 Or, with Go:
 
 ```sh
-GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.3.0
+GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.4.0
 ```
 
 ### Agent skill

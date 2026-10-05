@@ -5,7 +5,7 @@ login e não edita a config do Codex: quando faltar algum destes passos, ele par
 
 ## Binário em `~/.local/bin`
 
-Os comandos usam a `v0.3.0`, que só existe depois de publicada a release; antes disso,
+Os comandos usam a `v0.4.0`, que só existe depois de publicada a release; antes disso,
 use a última tag de [Releases](https://github.com/BasisTI/taiga-cli/releases).
 
 Caminho principal: o tar.gz da release, conferido pelo `SHA256SUMS`. Ajuste `P` para a
@@ -17,7 +17,7 @@ num subshell com `set -eu`: qualquer passo que falhe (download, checksum ausente
 ```sh
 (
   set -eu
-  V=0.3.0
+  V=0.4.0
   P=linux_amd64   # linux_arm64, darwin_amd64 ou darwin_arm64
   F="taiga_${V}_${P}.tar.gz"
   cd "$(mktemp -d)"
@@ -38,7 +38,7 @@ vazio, entre nele e rode o mesmo bloco sem as linhas do `cd` e do `gh`.
 Alternativa, com Go instalado:
 
 ```sh
-GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.3.0
+GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.4.0
 ```
 
 `~/.local/bin` precisa estar no `PATH`.
