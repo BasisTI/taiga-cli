@@ -64,7 +64,7 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 |---|---|
 | `taiga story list [--ref N] [--status S] [--assignee USER\|me] [--epic REF] [--swimlane L\|--no-swimlane] [--tag T]... [--search TEXT] [--closed[=false]]` | Every matching story, without manual paging. Repeated `--tag` must all match |
 | `taiga story get REF` / `taiga story get --id ID` | One story, with its web `url`; JSON output also carries `custom_attributes` (values with their own `version`) |
-| `taiga story create --subject S [--description-file F\|-] [--status S] [--tag T]... [--swimlane L] [--assignee USER]... [--epic REF]` | Create a story; `--epic` links it to an epic after creating it |
+| `taiga story create --subject S [--description-file F\|-] [--status S] [--tag T]... [--swimlane L] [--assignee USER]... [--owner-assignee USER] [--epic REF]` | Create a story; `--epic` links it to an epic after creating it |
 | `taiga story update REF [--subject S] [--description-file F\|-] [--append-description TEXT] [--status S] [--tag T]... [--add-tag T]... [--remove-tag T]... [--milestone M] [--swimlane L\|--clear-swimlane] [--add-assignee USER]... [--remove-assignee USER]... [--owner-assignee USER\|--clear-owner-assignee] [--block NOTE\|--unblock] [--epic REF\|--replace-epic REF --confirm-delete]` | Send only the fields that change, with the story `version`; then add the epic link, or make it the only one |
 | `taiga story close REF [--status S]` | Move to a closed status; never archives or deletes |
 | `taiga story field list REF` | The story's custom field values next to their definitions |
@@ -75,6 +75,7 @@ taiga api PATCH userstories/123 --field comment="Deployed to staging" --auto-ver
 
 - Statuses, milestones and swimlanes take a name or an id of the project; users take an exact username, an id or `me`, and must be project members. A name used twice is `ambiguous_name`.
 - `--tag` replaces the tags; `--add-tag`/`--remove-tag` merge with the current ones. Taiga stores tags in lower case, so the CLI sends them that way.
+- On `story create`, `--assignee` only fills the assignees (`assigned_users`) and leaves the main assignee (`assigned_to`, the one the board card shows) empty; `--owner-assignee` sets it and adds that user to the assignees too.
 - `--add-assignee`/`--remove-assignee` merge with the current assignees (`assigned_users`) and never change the main assignee (`assigned_to`); that takes `--owner-assignee` or `--clear-owner-assignee`. Taiga always shows the main assignee among the assignees, so removing them needs one of those two flags in the same command. Changing the main assignee keeps the others.
 - `--remove-assignee` also takes users who left the project. A write that changes assignees is not retried after a version conflict (exit 4; run it again, or use `--force-version`).
 - Taiga's concurrency check does not cover the main assignee (`assigned_to`). The CLI re-reads the assignees right before writing (a change since the first read is `version_conflict`) and checks the story after writing; a mismatch is `assignees_postcondition_failed` (exit 4): the write **was applied**, so check the story instead of re-running. A concurrent change in the short window between that re-read and the write is detected, not prevented. See [docs/api-notes.md](docs/api-notes.md).

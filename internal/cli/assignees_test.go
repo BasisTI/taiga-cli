@@ -30,6 +30,8 @@ func TestStoryAssigneeFlagsRejectedBeforeNetwork(t *testing.T) {
 		{"story", "create", "--subject", "s", "--assignee", ""},
 		{"story", "create", "--subject", "s", "--block", "x"},
 		{"story", "create", "--subject", "s", "--add-assignee", "svc"},
+		{"story", "create", "--subject", "s", "--owner-assignee", " "},
+		{"story", "create", "--subject", "s", "--clear-owner-assignee"},
 	} {
 		_, stderr, code := runIn(t, env, "", args...)
 		if code != 2 || !strings.Contains(stderr, "usage") {
@@ -110,6 +112,7 @@ func TestStoryAssigneeOutsideProjectIsNotFound(t *testing.T) {
 		{"story", "update", "246", "--owner-assignee", "outsider"},
 		{"story", "update", "246", "--add-assignee", "svc", "--block", "x", "--add-assignee", "outsider"},
 		{"story", "create", "--subject", "s", "--assignee", "outsider"},
+		{"story", "create", "--subject", "s", "--owner-assignee", "outsider"},
 	} {
 		_, stderr, code := runIn(t, f.env(), "", args...)
 		if code != 5 || !strings.Contains(stderr, "not_found") {
@@ -153,6 +156,32 @@ func TestStoryCreateWithAssignees(t *testing.T) {
 	}
 	if _, ok := w[0].body["assigned_to"]; ok {
 		t.Fatal("create set assigned_to")
+	}
+}
+
+// --owner-assignee on create sets assigned_to and also stores the owner in assigned_users, so a
+// later change of assigned_to does not drop them from the assignees.
+func TestStoryCreateWithOwnerAssignee(t *testing.T) {
+	f, calls := newStoryFake(t)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--owner-assignee", "svc"}, `{"assigned_to":6,"assigned_users":[6]}`},
+		{[]string{"--assignee", "me", "--owner-assignee", "svc"}, `{"assigned_to":6,"assigned_users":[5,6]}`},
+		{[]string{"--assignee", "svc", "--assignee", "me", "--owner-assignee", "6"}, `{"assigned_to":6,"assigned_users":[6,5]}`},
+	} {
+		before := len(writes(calls))
+		_, stderr, code := runIn(t, f.env(), "", append([]string{"story", "create", "--subject", "Nova"}, tc.args...)...)
+		w := writes(calls)
+		if code != 0 || len(w) != before+1 {
+			t.Fatalf("%v: %d %s", tc.args, code, stderr)
+		}
+		body := w[len(w)-1].body
+		got := bodyJSON(t, map[string]any{"assigned_to": body["assigned_to"], "assigned_users": body["assigned_users"]})
+		if got != tc.want {
+			t.Errorf("%v: %s", tc.args, got)
+		}
 	}
 }
 

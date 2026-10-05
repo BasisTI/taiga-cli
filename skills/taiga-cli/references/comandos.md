@@ -3,8 +3,8 @@
 | tarefa | comando |
 |---|---|
 | ler stories | `taiga story list [--status S] [--assignee me] [--epic REF] [--tag T] [--search TEXT] [--closed=false]`, `taiga story get REF` |
-| criar story | `taiga story create --subject S [--description-file F] [--status S] [--tag T] [--swimlane L] [--assignee U] [--epic REF]` |
-| mudar status, tags, responsáveis, sprint, bloqueio | `taiga story update REF --status S`, `--add-tag T`, `--add-assignee U`, `--milestone M`, `--block NOTA`/`--unblock`, `--append-description TEXTO` |
+| criar story | `taiga story create --subject S [--description-file F] [--status S] [--tag T] [--swimlane L] [--assignee U] [--owner-assignee U] [--epic REF]` (`--assignee` só preenche a lista de responsáveis; o responsável principal, que aparece no card, é `--owner-assignee`) |
+| mudar status, tags, responsáveis, sprint, bloqueio | `taiga story update REF --status S`, `--add-tag T`, `--add-assignee U`, `--owner-assignee U`, `--milestone M`, `--block NOTA`/`--unblock`, `--append-description TEXTO` |
 | fechar | `taiga story close REF [--status S]` (só muda o status; não arquiva nem apaga) |
 | swimlane | `taiga swimlane list`; `taiga story update REF --swimlane L` ou `--clear-swimlane` |
 | comentário | `taiga story comment REF --body TEXTO` ou `--body-file F`; ler com `taiga story comments REF` |
