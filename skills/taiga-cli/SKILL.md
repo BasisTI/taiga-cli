@@ -59,7 +59,8 @@ taiga task create --story REF --subject S;  taiga task close REF
 
 Anexo, campo customizado, épico, swimlane, `project plan|apply`, `taiga api` e as demais
 flags: abra [references/comandos.md](references/comandos.md) antes de montar o comando
-(exceto ao recuperar um código da conferência: `conferencia.md` já traz o comando).
+(exceto para executar um comando com as flags já escritas em `conferencia.md`; escrita
+residual, como um `field set` ou `--unset`, exige `comandos.md` ou o `--help`).
 Detalhe de flag: `taiga <comando> --help`.
 
 - **`--dry-run` antes de escrita em lote.** Toda escrita curada aceita `--dry-run`, que
