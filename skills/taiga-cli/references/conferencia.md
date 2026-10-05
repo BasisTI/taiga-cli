@@ -7,11 +7,8 @@ faltar.
 
 Nenhuma escrita curada sai com exit 7 depois de enviada: rede depois de aberta a conexão,
 timeout, 5xx e redirect 3xx (a CLI nunca segue `Location`) viram releitura ou
-`*_unconfirmed`. Criação de story, task, comentário e anexo com resposta inconclusiva sai
-**sempre** como não confirmada, mesmo quando o item aparece na releitura: nada prova que
-ele veio deste comando. Por isso, "o item está lá" nunca autoriza a criar outro; e "não
-está lá" também não, porque o servidor pode gravar depois da conferência. Espere um pouco
-e confira de novo.
+`*_unconfirmed`. Em criação, o item na releitura não prova que veio deste comando: nunca
+autoriza criar outro, e a ausência também não (o servidor pode gravar depois).
 
 | `code` | exit | o que foi gravado | conferência e próximo passo |
 |---|---|---|---|

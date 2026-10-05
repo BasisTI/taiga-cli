@@ -58,7 +58,8 @@ taiga task create --story REF --subject S;  taiga task close REF
 ```
 
 Anexo, campo customizado, épico, swimlane, `project plan|apply`, `taiga api` e as demais
-flags: abra [references/comandos.md](references/comandos.md) antes de montar o comando.
+flags: abra [references/comandos.md](references/comandos.md) antes de montar o comando
+(exceto ao recuperar um código da conferência: `conferencia.md` já traz o comando).
 Detalhe de flag: `taiga <comando> --help`.
 
 - **`--dry-run` antes de escrita em lote.** Toda escrita curada aceita `--dry-run`, que
@@ -100,8 +101,9 @@ estava em `applied`; o `apply` seguinte replaneja e não duplica.
 ## Gravado ou talvez gravado: conferir antes de repetir
 
 Os códigos `*_unconfirmed`, `write_applied`, `*_postcondition_failed`, `*_link_failed`,
-`project_apply_interrupted` e `project_changed` querem dizer que a escrita **foi aplicada**
-ou **pode** ter sido. A CLI nunca repete uma escrita sozinha; o agente também não.
+`project_apply_interrupted`, `project_changed` e `epic_replace_incomplete` querem dizer que
+a escrita **foi aplicada** ou **pode** ter sido. A CLI nunca repete uma escrita sozinha; o
+agente também não.
 
 **Ao ver qualquer um deles, abra [references/conferencia.md](references/conferencia.md)
 antes do próximo comando**: lá estão a conferência e o próximo passo de cada código. Leia
@@ -111,9 +113,9 @@ a `cause` (nomeia candidatas, ids e o estado encontrado), confira e repita só o
   não confirmada, mesmo quando o item aparece na releitura: nada prova que veio deste
   comando. "O item está lá" nunca autoriza criar outro; "não está lá" também não, porque o
   servidor pode gravar depois da conferência. Espere um pouco e confira de novo.
-- `--append-description` repetido duplica o texto.
-- Únicas exceções que convergem ao repetir o **mesmo comando**: `epic_link_unconfirmed` e
-  `epic_replace_incomplete` (detalhe na referência).
+- Só `epic_link_unconfirmed` e `epic_replace_incomplete` convergem ao repetir o **mesmo
+  comando**, e o segundo só quando o `recovery` não diz que o Taiga recusou o `DELETE`
+  (sem `modify_epic`): nesse caso repetir não adianta; a referência diz o que fazer.
 
 ## Seguro repetir
 

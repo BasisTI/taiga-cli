@@ -1,8 +1,5 @@
 # Comandos da `taiga`
 
-Story e task são nomeadas pela **ref** (o número da interface web), nunca pelo id interno.
-Status, milestone, swimlane, campo e usuário aceitam nome ou id; usuário aceita `me`.
-
 | tarefa | comando |
 |---|---|
 | ler stories | `taiga story list [--status S] [--assignee me] [--epic REF] [--tag T] [--search TEXT] [--closed=false]`, `taiga story get REF` |
@@ -43,6 +40,5 @@ Rode `--dry-run`/`plan` antes de aplicar.
 Para o que não tem comando curado: `taiga api GET|POST|PATCH|PUT|DELETE CAMINHO` (caminho
 relativo a `/api/v1/`), com `--query`, `--field`/`--raw-field`, `--input`, `--paginate`,
 `--auto-version`, `--dry-run`; `DELETE` exige `--confirm-delete`. Imprime a resposta do
-Taiga como veio, sem redigir links assinados, e **não confere** escritas: num
-`POST`/`PATCH`, exit 7 depois do envio também pode ter gravado. Confira com um `GET` antes
-de repetir.
+Taiga como veio, sem redigir links assinados, e **não confere** escritas (exit 7 num
+`POST`/`PATCH`: confira com um `GET` antes de repetir).
