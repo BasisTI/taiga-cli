@@ -180,11 +180,12 @@ func (a *App) resolveStoryValue(cmd *cobra.Command, service *app.Service, field,
 }
 
 // assigneeFlags are the assignee and block flags: create takes the initial assignees, update
-// merges into the current ones and changes the main assignee only when asked.
+// merges into the current ones; both change the main assignee only when asked.
 func assigneeFlags(cmd *cobra.Command, update bool) {
 	f := cmd.Flags()
 	if !update {
-		f.StringArray("assignee", nil, "initial assignee (project username, id or me), repeatable")
+		f.StringArray("assignee", nil, "initial assignee (project username, id or me), repeatable; does not set the main assignee")
+		f.String("owner-assignee", "", "main assignee (assigned_to), also added to the assignees: project username, id or me")
 		return
 	}
 	f.StringArray("add-assignee", nil, "add an assignee (project username, id or me), repeatable")
@@ -220,12 +221,12 @@ func checkAssigneeFlags(cmd *cobra.Command, update bool) error {
 			}
 		}
 	}
-	if !update {
-		return nil
-	}
 	owner, _ := f.GetString("owner-assignee")
 	if f.Changed("owner-assignee") && strings.TrimSpace(owner) == "" {
 		return app.Usage("--owner-assignee cannot be blank")
+	}
+	if !update {
+		return nil
 	}
 	clearOwner, _ := f.GetBool("clear-owner-assignee")
 	if f.Changed("owner-assignee") && clearOwner {
@@ -270,11 +271,23 @@ func resolveAssignees(cmd *cobra.Command, service *app.Service, patch *app.Patch
 		return app.MergeIDs(nil, ids, nil), nil
 	}
 	if !update {
-		if f.Changed("assignee") {
-			ids, err := resolve("assignee")
+		ids, err := resolve("assignee")
+		if err != nil {
+			return err
+		}
+		// The main assignee also goes into the stored list: one that is only in assigned_to
+		// drops out of the assignees when a later write changes assigned_to (docs/api-notes.md).
+		if f.Changed("owner-assignee") {
+			value, _ := f.GetString("owner-assignee")
+			user, err := service.Member(cmd.Context(), value)
 			if err != nil {
 				return err
 			}
+			id := app.ID(user["id"])
+			patch.Set["assigned_to"] = id
+			ids = app.MergeIDs(ids, []int64{id}, nil)
+		}
+		if f.Changed("assignee") || f.Changed("owner-assignee") {
 			patch.Set["assigned_users"] = ids
 		}
 		return nil

@@ -51,7 +51,7 @@ Status, milestone, swimlane, campo e usuário aceitam nome ou id; usuário aceit
 
 ```
 taiga story list [--status S] [--assignee me] [--epic REF] [--search TEXT]; taiga story get REF
-taiga story create --subject S [--status S] [--epic REF] ...
+taiga story create --subject S [--status S] [--owner-assignee U] [--epic REF] ...
 taiga story update REF --status S | --add-tag T | --add-assignee U | --milestone M
 taiga story comment REF --body TEXTO         # ler: taiga story comments REF
 taiga task create --story REF --subject S;  taiga task close REF

@@ -201,6 +201,10 @@ func TestIntegrationStoryAssigneesAndBlock(t *testing.T) {
 	if users(created) != admin || created["assigned_to"] != nil {
 		t.Fatalf("create: %v %v", created["assigned_users"], created["assigned_to"])
 	}
+	owned := storyJSON(t, env, "", "story", "create", "--subject", "owner "+fmt.Sprint(time.Now().UnixNano()), "--assignee", testtaiga.ServiceUser, "--owner-assignee", "me")
+	if users(owned) != both || fmt.Sprint(owned["assigned_to"]) != admin {
+		t.Fatalf("create owner: %v %v", owned["assigned_users"], owned["assigned_to"])
+	}
 	update := []string{"story", "update", ref, "--add-assignee", testtaiga.ServiceUser, "--owner-assignee", "me", "--block", "aguardando \"B6\"\nção"}
 	plan := storyJSON(t, env, "", append(update, "--dry-run")...)
 	if plan["dry_run"] != true || storyJSON(t, env, "", "story", "get", ref)["version"] != created["version"] {
