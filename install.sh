@@ -54,7 +54,9 @@ main() {
     esac
   done
 
-  [ -n "$dir" ] && [ "$dir" != "/.local/bin" ] || die "cannot work out the destination: set HOME, TAIGA_INSTALL_DIR or --dir"
+  if [ -z "$dir" ] || [ "$dir" = "/.local/bin" ]; then
+    die "cannot work out the destination: set HOME, TAIGA_INSTALL_DIR or --dir"
+  fi
   while [ "${#dir}" -gt 1 ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
 
   if command -v curl >/dev/null 2>&1; then

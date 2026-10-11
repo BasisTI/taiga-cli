@@ -8,7 +8,7 @@ set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/taiga-install-test.XXXXXX")
 server_pid=""
-# shellcheck disable=SC2329  # runs from the EXIT trap
+# shellcheck disable=SC2317,SC2329  # runs from the EXIT trap
 cleanup() {
   [ -z "$server_pid" ] || kill "$server_pid" 2>/dev/null || true
   rm -rf "$work"
@@ -144,7 +144,7 @@ for sh_bin in "$@"; do
   if [ $rc -eq 0 ] && [ -x "$d/e/taiga" ]; then check "--version=/--dir= options ($sh_bin)" 0; else check "--version=/--dir= options ($sh_bin)" 1; fi
 
   # piped, as in curl | sh -s -- ...
-  rc=0; out=$(cat "$root/install.sh" | "$sh_bin" -s -- --version 0.3.0 --dir "$d/f" 2>&1) || rc=$?
+  rc=0; out=$(cat < "$root/install.sh" | "$sh_bin" -s -- --version 0.3.0 --dir "$d/f" 2>&1) || rc=$?
   if [ $rc -eq 0 ] && [ -x "$d/f/taiga" ]; then check "piped to sh -s -- ($sh_bin)" 0; else check "piped to sh -s -- ($sh_bin)" 1; fi
 
   # wget fallback (latest and pinned)
