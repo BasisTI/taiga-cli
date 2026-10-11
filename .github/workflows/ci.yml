@@ -25,6 +25,13 @@ jobs:
         with:
           version: v2.14.0
           install-mode: goinstall
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck dash
+      - run: shellcheck -s sh install.sh scripts/test-install
+      - run: scripts/test-install dash sh bash
   integration:
     runs-on: ubuntu-latest
     steps:

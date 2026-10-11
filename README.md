@@ -10,7 +10,27 @@
 
 Install the binary in `~/.local/bin` (it must be on your `PATH`). The commands below use `v0.4.0`, which exists only once that release is published; until then, use the latest tag on [GitHub Releases](https://github.com/BasisTI/taiga-cli/releases).
 
-Download the tarball for your platform together with `SHA256SUMS`; the binary is installed only if its checksum matches. The block runs in a subshell with `set -eu`, so any failing step (download, a missing or failed checksum, extraction) stops it before anything is installed, and your shell stays open. On macOS, where `sha256sum` may be missing, it uses `shasum -a 256`:
+One line, with `curl` (or `wget`) and no `gh`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BasisTI/taiga-cli/main/install.sh | sh
+```
+
+[`install.sh`](install.sh) is POSIX `sh` and never uses `sudo`. It picks the latest release (no GitHub API call), downloads the tarball for your OS and architecture (Linux or macOS, amd64 or arm64) with `SHA256SUMS`, installs only if the checksum matches, and finishes by running `taiga version`. Pass options after `sh -s --`, or use the environment variables:
+
+```sh
+# a specific version (with or without the "v") in another directory
+curl -fsSL https://raw.githubusercontent.com/BasisTI/taiga-cli/main/install.sh | sh -s -- --version v0.4.0 --dir "$HOME/bin"
+curl -fsSL https://raw.githubusercontent.com/BasisTI/taiga-cli/main/install.sh | TAIGA_VERSION=0.4.0 TAIGA_INSTALL_DIR="$HOME/bin" sh
+```
+
+It warns when the destination is not on your `PATH`. `TAIGA_INSTALL_BASE_URL` replaces the releases URL and exists only to test the installer against a local fixture (`scripts/test-install`); do not set it otherwise.
+
+Prefer to read the script first? Download `install.sh`, review it and run `sh install.sh`.
+
+### Manual install
+
+To do it by hand, download the tarball for your platform together with `SHA256SUMS`; the binary is installed only if its checksum matches. The block runs in a subshell with `set -eu`, so any failing step (download, a missing or failed checksum, extraction) stops it before anything is installed, and your shell stays open. On macOS, where `sha256sum` may be missing, it uses `shasum -a 256`:
 
 ```sh
 (
