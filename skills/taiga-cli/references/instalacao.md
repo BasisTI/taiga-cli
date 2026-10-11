@@ -8,7 +8,26 @@ login e não edita a config do Codex: quando faltar algum destes passos, ele par
 Os comandos usam a `v0.4.0`, que só existe depois de publicada a release; antes disso,
 use a última tag de [Releases](https://github.com/BasisTI/taiga-cli/releases).
 
-Caminho principal: o tar.gz da release, conferido pelo `SHA256SUMS`. Ajuste `P` para a
+Caminho principal, uma linha, com `curl` (ou `wget`), sem `gh`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BasisTI/taiga-cli/main/install.sh | sh
+```
+
+O `install.sh` é `sh` POSIX e nunca usa `sudo`: descobre a última release (sem a API do
+GitHub), baixa o tar.gz da sua plataforma (Linux ou macOS, amd64 ou arm64) com o
+`SHA256SUMS`, só instala se o checksum bater e termina rodando `taiga version`. Versão e
+destino se fixam por opção ou por variável; ele avisa se o destino não está no `PATH`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BasisTI/taiga-cli/main/install.sh | sh -s -- --version v0.4.0 --dir "$HOME/bin"
+curl -fsSL https://raw.githubusercontent.com/BasisTI/taiga-cli/main/install.sh | TAIGA_VERSION=0.4.0 TAIGA_INSTALL_DIR="$HOME/bin" sh
+```
+
+`TAIGA_INSTALL_BASE_URL` existe só para testar o instalador contra uma fixture local; não
+a defina fora disso.
+
+Alternativa manual, o tar.gz da release conferido pelo `SHA256SUMS`. Ajuste `P` para a
 plataforma (`linux_amd64`, `linux_arm64`, `darwin_amd64` ou `darwin_arm64`). O bloco roda
 num subshell com `set -eu`: qualquer passo que falhe (download, checksum ausente ou
 `FAILED`, extração) interrompe antes de instalar, sem fechar o seu shell. No macOS, sem
@@ -35,7 +54,7 @@ num subshell com `set -eu`: qualquer passo que falhe (download, checksum ausente
 Sem `gh`, baixe o tar.gz e o `SHA256SUMS` pela página de releases para um diretório
 vazio, entre nele e rode o mesmo bloco sem as linhas do `cd` e do `gh`.
 
-Alternativa, com Go instalado:
+Outra alternativa, com Go instalado:
 
 ```sh
 GOBIN="$HOME/.local/bin" go install github.com/BasisTI/taiga-cli/cmd/taiga@v0.4.0

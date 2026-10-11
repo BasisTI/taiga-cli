@@ -25,6 +25,18 @@ jobs:
         with:
           version: v2.14.0
           install-mode: goinstall
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck dash
+      - run: shellcheck -s sh install.sh scripts/test-install
+      - run: scripts/test-install dash sh bash
+      # Alpine has no curl and a BusyBox wget (no --max-redirect); the whole suite
+      # runs there so the wget fallback is exercised for real.
+      - run: >
+          docker run --rm --network host -v "$PWD:/src:ro" alpine:3.23
+          sh -c 'apk add --no-cache python3 >/dev/null && sh /src/scripts/test-install sh'
   integration:
     runs-on: ubuntu-latest
     steps:
