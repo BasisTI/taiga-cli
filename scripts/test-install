@@ -62,6 +62,12 @@ class H(http.server.SimpleHTTPRequestHandler):
             self.send_header("Location", "/tag/v0.4.0")
             self.end_headers()
             return
+        if self.path.startswith("/tag/"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<html>release</html>")
+            return
         super().do_GET()
     def log_message(self, *a):
         pass
@@ -147,7 +153,7 @@ for sh_bin in "$@"; do
   rc=0; out=$(cat < "$root/install.sh" | "$sh_bin" -s -- --version 0.3.0 --dir "$d/f" 2>&1) || rc=$?
   if [ $rc -eq 0 ] && [ -x "$d/f/taiga" ]; then check "piped to sh -s -- ($sh_bin)" 0; else check "piped to sh -s -- ($sh_bin)" 1; fi
 
-  # wget fallback (latest and pinned)
+  # wget fallback (latest only; the pinned path uses the same download())
   if [ -x "$nocurl/wget" ]; then
     sh_path=$(command -v "$sh_bin")
     rc=0; out=$(PATH="$nocurl" TAIGA_INSTALL_DIR="$d/w" "$sh_path" "$root/install.sh" 2>&1 </dev/null) || rc=$?
@@ -185,9 +191,24 @@ for sh_bin in "$@"; do
   TAIGA_VERSION='../x' TAIGA_INSTALL_DIR="$d/m" run "$sh_bin"
   if [ $rc -ne 0 ] && contains "$out" "invalid version"; then check "invalid version rejected ($sh_bin)" 0; else check "invalid version rejected ($sh_bin)" 1; fi
 
-  # truncated script: defines and runs nothing
-  rc=0; out=$(head -c 400 "$root/install.sh" | TAIGA_INSTALL_DIR="$d/n" "$sh_bin" 2>&1) || rc=$?
-  if [ ! -e "$d/n" ]; then check "truncated script installs nothing ($sh_bin)" 0; else check "truncated script installs nothing ($sh_bin)" 1; fi
+  # truncated script: a cut at any point installs nothing
+  total=$(wc -c < "$root/install.sh")
+  main_line=$(grep -n '^  main "\$@"' "$root/install.sh" | cut -d: -f1)
+  last_main=$(head -n $((main_line - 1)) "$root/install.sh" | wc -c)
+  trunc_ok=1
+  for cut in 0 100 400 $((total / 2)) $((last_main + 6)) $((last_main + 7)) $((last_main + 8)) $((total - 6)) $((total - 2)); do
+    rm -rf "$d/n"
+    rc=0; out=$(head -c "$cut" "$root/install.sh" | TAIGA_INSTALL_DIR="$d/n" "$sh_bin" 2>&1) || rc=$?
+    if [ -e "$d/n" ]; then echo "  truncated at $cut bytes installed something" >&2; trunc_ok=0; fi
+  done
+  if [ $trunc_ok -eq 1 ]; then check "truncated script installs nothing, at 9 cut points ($sh_bin)" 0; else check "truncated script installs nothing ($sh_bin)" 1; fi
+  rc=0; out=$(head -c "$total" "$root/install.sh" | TAIGA_INSTALL_DIR="$d/n" "$sh_bin" 2>&1) || rc=$?
+  if [ $rc -eq 0 ] && [ -x "$d/n/taiga" ]; then check "the complete script piped in installs ($sh_bin)" 0; else check "the complete script piped in installs ($sh_bin)" 1; fi
+
+  # destination taiga is a directory
+  mkdir -p "$d/o/taiga"
+  TAIGA_VERSION=0.3.0 TAIGA_INSTALL_DIR="$d/o" run "$sh_bin"
+  if [ $rc -ne 0 ] && contains "$out" "not a regular file" && [ "$(find "$d/o" -mindepth 1 | wc -l)" -eq 1 ]; then check "destination taiga is a directory ($sh_bin)" 0; else check "destination taiga is a directory ($sh_bin)" 1; fi
 done
 
 echo "$n checks, $([ $fail -eq 0 ] && echo passed || echo FAILED)"
