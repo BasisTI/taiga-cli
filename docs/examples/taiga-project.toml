@@ -1,7 +1,7 @@
 # Configuração de projeto para `taiga project plan|apply -f`.
 #
-# Este arquivo é a convenção canônica do fluxo da skill basis-ci-gitlab: os status
-# `In revision` e `Waiting for deployment` e os 6 campos de registro de início e de teste.
+# Este arquivo é a convenção canônica do fluxo da skill basis-ci-gitlab: o status
+# `Waiting for deployment` e os 6 campos de registro de início e de teste.
 # Substitui o configurar-taiga-projeto.sh; as diferenças de comportamento em relação ao
 # script foram aprovadas na US #254 (decisão D5). Mude nomes, cores ou descrições aqui, e
 # não num board isolado, para o fluxo continuar igual em todos os projetos.
@@ -13,12 +13,6 @@
 #   ordem inteira numa requisição só, conferindo a ordem antes e depois: o Taiga 6.7 não tem
 #   controle de concorrência na ordem (ver docs/api-notes.md), então a conferência detecta parte
 #   das corridas, não impede. Sem `after`, o status novo é criado no fim do board.
-
-[[story_status]]
-name = "In revision"
-color = "#5178D3"
-closed = false
-after = "In progress"
 
 [[story_status]]
 name = "Waiting for deployment"

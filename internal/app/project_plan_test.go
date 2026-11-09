@@ -253,11 +253,11 @@ func TestExampleProjectFile(t *testing.T) {
 	}
 	statuses := append(remoteStatuses(), Object{"id": 6, "name": "Archived", "order": 6, "color": "#A9AABC", "is_closed": true})
 	plan, err := BuildProjectPlan(spec, statuses, nil)
-	if err != nil || len(plan.Actions) != 9 || plan.Actions[8].Kind != "reorder_statuses" {
+	if err != nil || len(plan.Actions) != 8 || plan.Actions[7].Kind != "reorder_statuses" {
 		t.Fatalf("%s %v", kinds(plan.Actions), err)
 	}
-	want := []string{"New", "In progress", "In revision", "Ready for test", "Waiting for deployment", "Done", "Archived"}
-	if got := plan.Actions[8].Body["names"]; !reflect.DeepEqual(got, want) {
+	want := []string{"New", "In progress", "Ready for test", "Waiting for deployment", "Done", "Archived"}
+	if got := plan.Actions[7].Body["names"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("order: %v", got)
 	}
 }

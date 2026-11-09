@@ -26,7 +26,7 @@ Detalhes de cada flag: `taiga <comando> --help`. Comportamento de cada comando:
 
 ## Board da Basis
 
-O arquivo canônico do fluxo da `basis-ci-gitlab` (status `In revision` e
+O arquivo canônico do fluxo da `basis-ci-gitlab` (status
 `Waiting for deployment` e os 6 campos de registro) é o
 [`docs/examples/taiga-project.toml`](https://github.com/BasisTI/taiga-cli/blob/main/docs/examples/taiga-project.toml).
 `taiga project plan` só lê; o `apply` exige admin do projeto (`admin_project_values`),
