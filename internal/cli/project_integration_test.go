@@ -296,10 +296,10 @@ func TestIntegrationProjectApplyBasisExample(t *testing.T) {
 	}
 	out, errOut, code := runIn(t, env, string(example), "project", "apply", "-f", "-")
 	r := applyResult(t, out)
-	if code != 0 || r["complete"] != true || len(r["applied"].([]any)) != 9 {
+	if code != 0 || r["complete"] != true || len(r["applied"].([]any)) != 8 {
 		t.Fatalf("apply: %d %s %s", code, errOut, out)
 	}
-	want := "New,Ready,In progress,In revision,Ready for test,Waiting for deployment,Done,Archived"
+	want := "New,Ready,In progress,Ready for test,Waiting for deployment,Done,Archived"
 	if got := statusOrder(t, env); got != want {
 		t.Fatalf("order:\n%s\nwant\n%s", got, want)
 	}
