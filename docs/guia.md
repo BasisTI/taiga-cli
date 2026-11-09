@@ -191,7 +191,7 @@ taiga story field set 246 --unset "Testado em staging" --unset "Data de entrega"
 
 Substitui o `configurar-taiga-projeto.sh` da skill basis-ci-gitlab. O arquivo TOML declara status de story e campos
 customizados de story. [docs/examples/taiga-project.toml](examples/taiga-project.toml) é a convenção canônica do fluxo
-da `basis-ci-gitlab` (`In revision`, `Waiting for deployment` e os seis campos de registro); as diferenças de
+da `basis-ci-gitlab` (`Waiting for deployment` e os seis campos de registro); as diferenças de
 comportamento em relação ao script foram aprovadas na US #254. A CLI não embute esses valores: eles vêm do arquivo.
 
 ```sh
@@ -210,7 +210,7 @@ taiga project apply -f taiga-project.toml          # exige admin do projeto
 - Status novo entra depois do último, na ordem do arquivo. `after` põe o status depois de outro (existente ou do
   próprio arquivo); ciclo, autorreferência e status inexistente são erro de uso. Quando o `after` exige mover status,
   o `apply` grava a ordem inteira no fim, numa única requisição `bulk_update_order` — é o caso do exemplo
-  (`In revision` depois de `In progress`).
+  (`Waiting for deployment` depois de `Ready for test`).
 - **Reordenação conferida, não protegida.** O Taiga 6.7 não tem controle de concorrência na ordem dos status (não há
   `version`; ver `docs/api-notes.md`). Por decisão de 2026-10-01 ("aceitar com conferência"), o `apply` relê a ordem
   logo antes de gravar e recusa se algo mudou desde o plano (`project_changed`, exit 4, nada enviado); logo depois,
